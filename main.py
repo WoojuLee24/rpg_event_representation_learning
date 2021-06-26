@@ -36,6 +36,10 @@ def FLAGS():
     parser.add_argument("--num_epochs", type=int, default=30)
     parser.add_argument("--save_every_n_epochs", type=int, default=5)
 
+    parser.add_argument("--lr", type=float, default=1e-5)
+    parser.add_argument("--lr_decay", type=float, default=0.9)
+
+
     flags = parser.parse_args()
 
     assert os.path.isdir(dirname(flags.log_dir)), f"Log directory root {dirname(flags.log_dir)} not found."
@@ -93,8 +97,9 @@ if __name__ == '__main__':
     model = model.to(flags.device)
 
     # optimizer and lr scheduler
-    optimizer = torch.optim.Adam(model.parameters(), lr=1e-4)
-    lr_scheduler = torch.optim.lr_scheduler.ExponentialLR(optimizer, 0.5)
+    # optimizer = torch.optim.Adam(model.parameters(), lr=1e-4)
+    optimizer = torch.optim.Adam(model.parameters(), lr=flags.lr)
+    lr_scheduler = torch.optim.lr_scheduler.ExponentialLR(optimizer, flags.lr_decay)
 
     writer = SummaryWriter(flags.log_dir)
 
