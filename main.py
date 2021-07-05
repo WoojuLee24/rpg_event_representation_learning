@@ -7,6 +7,7 @@ import numpy as np
 import tqdm
 
 from utils.models import Classifier
+from utils.models import PreprocessLayer
 from torch.utils.tensorboard import SummaryWriter
 from utils.loader import Loader
 from utils.loss import cross_entropy_loss_and_accuracy
@@ -93,6 +94,7 @@ if __name__ == '__main__':
     validation_loader = Loader(validation_dataset, flags, device=flags.device)
 
     # model, and put to device
+    preprocess = PreprocessLayer()
     model = Classifier()
     model = model.to(flags.device)
 
@@ -115,7 +117,8 @@ if __name__ == '__main__':
         for events, labels in tqdm.tqdm(validation_loader):
 
             with torch.no_grad():
-                pred_labels, representation = model(events)
+                t = preprocess(events)
+                pred_labels, representation = model(events, t)
                 loss, accuracy = cross_entropy_loss_and_accuracy(pred_labels, labels)
 
             sum_accuracy += accuracy
@@ -159,8 +162,8 @@ if __name__ == '__main__':
         print(f"Training step [{i:3d}/{flags.num_epochs:3d}]")
         for events, labels in tqdm.tqdm(training_loader):
             optimizer.zero_grad()
-
-            pred_labels, representation = model(events)
+            t = preprocess(events)
+            pred_labels, representation = model(events, t)
             loss, accuracy = cross_entropy_loss_and_accuracy(pred_labels, labels)
 
             loss.backward()

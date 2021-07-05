@@ -7,6 +7,49 @@ from torchvision.models.resnet import resnet34
 import tqdm
 
 
+def preprocess_layer(events, dim=(9, 180, 240)):
+    # points is a list, since events can have any size
+    B = int((1 + events[-1, -1]).item())
+    num_voxels = int(2 * np.prod(dim) * B)
+    vox = events[0].new_full([num_voxels, ], fill_value=0)
+    C, H, W = dim
+
+    # get values for each channel
+    x, y, t, p, b = events.t()
+
+    # normalizing timestamps
+    for bi in range(B):
+        t[events[:, -1] == bi] /= t[events[:, -1] == bi].max()
+
+    p = (p + 1) / 2  # maps polarity to 0, 1
+
+    idx_before_bins = x \
+                      + W * y \
+                      + 0 \
+                      + W * H * C * p \
+                      + W * H * C * 2 * b
+
+    return t, C, H, W, idx_before_bins, num_voxels, events
+
+
+class PreprocessLayer(nn.Module):
+    def __init__(self):
+        nn.Module.__init__(self)
+
+    def forward(self, events):
+        # points is a list, since events can have any size
+        B = int((1 + events[-1, -1]).item())
+
+        # get values for each channel
+        x, y, t, p, b = events.t()
+
+        # normalizing timestamps
+        for bi in range(B):
+            t[events[:, -1] == bi] /= t[events[:, -1] == bi].max()
+
+        return t
+
+
 class ValueLayer(nn.Module):
     def __init__(self, mlp_layers, activation=nn.ReLU(), num_channels=9):
         assert mlp_layers[-1] == 1, "Last layer of the mlp must have 1 input channel."
@@ -89,19 +132,19 @@ class QuantizationLayer(nn.Module):
                                       num_channels=dim[0])
         self.dim = dim
 
-    def forward(self, events):
+    def forward(self, events, t):
         # points is a list, since events can have any size
-        B = int((1+events[-1,-1]).item())
+        B = int((1+events[-1, -1]).item())
         num_voxels = int(2 * np.prod(self.dim) * B)
         vox = events[0].new_full([num_voxels,], fill_value=0)
         C, H, W = self.dim
 
         # get values for each channel
-        x, y, t, p, b = events.t()
+        x, y, _, p, b = events.t()
 
-        # normalizing timestamps
-        for bi in range(B):
-            t[events[:,-1] == bi] /= t[events[:,-1] == bi].max()
+        # # normalizing timestamps
+        # for bi in range(B):
+        #     t[events[:,-1] == bi] /= t[events[:,-1] == bi].max()
 
         p = (p+1)/2  # maps polarity to 0, 1
 
@@ -157,8 +200,8 @@ class Classifier(nn.Module):
 
         return x
 
-    def forward(self, x):
-        vox = self.quantization_layer.forward(x)
+    def forward(self, x, t):
+        vox = self.quantization_layer.forward(x, t)
         vox_cropped = self.crop_and_resize_to_resolution(vox, self.crop_dimension)
         pred = self.classifier.forward(vox_cropped)
         return pred, vox
