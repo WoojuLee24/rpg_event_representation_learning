@@ -60,6 +60,7 @@ class ValueLayer(nn.Module):
         self.activation = activation
 
         # create mlp
+        # [1, 30], [30, 30], [30, 1] mlp layers
         in_channels = 1
         for out_channels in mlp_layers[1:]:
             self.mlp.append(nn.Linear(in_channels, out_channels))
@@ -75,13 +76,17 @@ class ValueLayer(nn.Module):
 
     def forward(self, x):
         # create sample of batchsize 1 and input channels 1
+        # x shape: [1, n, 1]
         x = x[None,...,None]
 
         # apply mlp convolution
+        # mlp: [1, 30], [30, 30]
+        # x shape: [1, n, 30], [1, n, 30]
         for i in range(len(self.mlp[:-1])):
             x = self.activation(self.mlp[i](x))
-
+        # x shape: [1, n, 1]
         x = self.mlp[-1](x)
+        # x shape [n,]
         x = x.squeeze()
 
         return x
