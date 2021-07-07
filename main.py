@@ -38,6 +38,8 @@ def FLAGS():
 
     flags = parser.parse_args()
 
+    if not os.path.exists(flags.log_dir):
+        os.mkdir(flags.log_dir)
     assert os.path.isdir(dirname(flags.log_dir)), f"Log directory root {dirname(flags.log_dir)} not found."
     assert os.path.isdir(flags.validation_dataset), f"Validation dataset directory {flags.validation_dataset} not found."
     assert os.path.isdir(flags.training_dataset), f"Training dataset directory {flags.training_dataset} not found."
