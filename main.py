@@ -36,6 +36,17 @@ def FLAGS():
     parser.add_argument("--num_epochs", type=int, default=30)
     parser.add_argument("--save_every_n_epochs", type=int, default=5)
 
+    # network architecture
+    parser.add_argument("--value_layer", type=str, default="ValueLayer")
+    parser.add_argument("--projection", type=str, default="")
+
+
+    # adv attack options
+    parser.add_argument("--adv", type=bool, default=False)
+    parser.add_argument("--epsilon", type=int, default=10)
+    parser.add_argument("--num_iter", type=int, default=2)
+    parser.add_argument("--step_size", type=float, default=0.5)
+
     flags = parser.parse_args()
 
     if not os.path.exists(flags.log_dir):
@@ -91,7 +102,8 @@ if __name__ == '__main__':
     validation_loader = Loader(validation_dataset, flags, device=flags.device)
 
     # model, and put to device
-    model = Classifier()
+    model = Classifier(value_layer=flags.value_layer, projection=flags.projection,
+                       adv=flags.adv, epsilon=flags.epsilon, num_iter=flags.num_iter, step_size=flags.step_size)
     model = model.to(flags.device)
 
     # optimizer and lr scheduler
@@ -112,7 +124,7 @@ if __name__ == '__main__':
         for events, labels in tqdm.tqdm(validation_loader):
 
             with torch.no_grad():
-                pred_labels, representation = model(events)
+                pred_labels, labels = model(events, labels)
                 loss, accuracy = cross_entropy_loss_and_accuracy(pred_labels, labels)
 
             sum_accuracy += accuracy
@@ -124,9 +136,9 @@ if __name__ == '__main__':
         writer.add_scalar("validation/accuracy", validation_accuracy, iteration)
         writer.add_scalar("validation/loss", validation_loss, iteration)
 
-        # visualize representation
-        representation_vizualization = create_image(representation)
-        writer.add_image("validation/representation", representation_vizualization, iteration)
+        # # visualize representation
+        # representation_vizualization = create_image(representation)
+        # writer.add_image("validation/representation", representation_vizualization, iteration)
 
         print(f"Validation Loss {validation_loss:.4f}  Accuracy {validation_accuracy:.4f}")
 
@@ -138,7 +150,7 @@ if __name__ == '__main__':
                 "state_dict": state_dict,
                 "min_val_loss": min_validation_loss,
                 "iteration": iteration
-            }, "log/model_best.pth")
+            }, flags.log_dir + "/model_best.pth")
             print("New best at ", validation_loss)
 
         if i % flags.save_every_n_epochs == 0:
@@ -147,7 +159,7 @@ if __name__ == '__main__':
                 "state_dict": state_dict,
                 "min_val_loss": min_validation_loss,
                 "iteration": iteration
-            }, "log/checkpoint_%05d_%.4f.pth" % (iteration, min_validation_loss))
+            }, flags.log_dir + "/checkpoint_%05d_%.4f.pth" % (iteration, min_validation_loss))
 
         sum_accuracy = 0
         sum_loss = 0
@@ -157,7 +169,7 @@ if __name__ == '__main__':
         for events, labels in tqdm.tqdm(training_loader):
             optimizer.zero_grad()
 
-            pred_labels, representation = model(events)
+            pred_labels, labels = model(events, labels)
             loss, accuracy = cross_entropy_loss_and_accuracy(pred_labels, labels)
 
             loss.backward()
@@ -179,5 +191,5 @@ if __name__ == '__main__':
         writer.add_scalar("training/accuracy", training_accuracy, iteration)
         writer.add_scalar("training/loss", training_loss, iteration)
 
-        representation_vizualization = create_image(representation)
-        writer.add_image("training/representation", representation_vizualization, iteration)
+        # representation_vizualization = create_image(representation)
+        # writer.add_image("training/representation", representation_vizualization, iteration)
