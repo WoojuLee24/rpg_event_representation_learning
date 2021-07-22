@@ -101,11 +101,20 @@ class TrilinearLayer(nn.Module):
         gt_values[ts > 0] = (1 - (num_channels-1) * ts)[ts > 0]
         gt_values[ts < 0] = ((num_channels-1) * ts + 1)[ts < 0]
 
-        gt_values[ts < -1.0 / (num_channels-1)] = 0
-        gt_values[ts > 1.0 / (num_channels-1)] = 0
+        if num_channels == 1:
+            gt_values[ts < -1.0] = 0
+            gt_values[ts > 1.0] = 0
+        else:
+            gt_values[ts < -1.0 / (num_channels-1)] = 0
+            gt_values[ts > 1.0 / (num_channels-1)] = 0
 
         return gt_values
 
+class NoneLayer(nn.Module):
+    def __init__(self):
+        nn.Module.__init__(self)
+    def forward(self, x):
+        return x
 
 
 class QuantizationLayer(nn.Module):
@@ -115,7 +124,9 @@ class QuantizationLayer(nn.Module):
                  value_layer="ValueLayer",
                  projection=None):
         nn.Module.__init__(self)
-        if value_layer == "ValueLayer":
+        if value_layer == "NoneLayer":
+            self.value_layer = NoneLayer()
+        elif value_layer == "ValueLayer":
             self.value_layer = ValueLayer(mlp_layers, activation=activation, num_channels=dim[0])
         elif value_layer == "TrilinearLayer":
             self.value_layer = TrilinearLayer(num_channels=dim[0])
@@ -145,15 +156,26 @@ class QuantizationLayer(nn.Module):
                           + W * H * C * p \
                           + W * H * C * 2 * b
 
-        for i_bin in range(C):
-            values = t * self.value_layer.forward(t-i_bin/(C-1))
-
-            # draw in voxel grid
-            idx = idx_before_bins + W * H * i_bin
+        if C == 1:
+            # values = t * self.value_layer.forward(t)
+            # if values == t:
+            #     print("same")
+            # else:
+            #     print("not same")
+            values = t
+            idx = idx_before_bins
             vox.put_(idx.long(), values, accumulate=True)
+        else:
+            for i_bin in range(C):
+                values = t * self.value_layer.forward(t-i_bin/(C-1))
+
+                # draw in voxel grid
+                idx = idx_before_bins + W * H * i_bin
+                vox.put_(idx.long(), values, accumulate=True)
 
         vox = vox.view(-1, 2, C, H, W)
         vox = torch.cat([vox[:, 0, ...], vox[:, 1, ...]], 1)
+
         if self.projection == None:
             pass
         elif self.projection == "polarity":
@@ -230,7 +252,7 @@ class Classifier(nn.Module):
         self.projection = projection
 
         # replace fc layer and first convolutional layer
-        if self.projection == '':
+        if self.projection == None:
             input_channels = 2 * voxel_dimension[0]
         elif self.projection == 'polarity':
             input_channels = voxel_dimension[0]
@@ -318,6 +340,19 @@ class Classifier(nn.Module):
         label_offset = torch.randint_like(label, low=0, high=self.num_classes)
         return (label + label_offset) % self.num_classes
 
+    # def get_topk(self, x, n=4):
+    #     B, C, H, W = x.size()
+    #     x = torch.reshape(x, (B, C, H * W))
+    #     #         topk = torch.zeros(B, C, H*W)
+    #     topk = torch.zeros_like(x)
+    #     _, idx, = torch.topk(torch.abs(x), n)
+    #     for i in range(B):
+    #         for j in range(C):
+    #             for k in idx[i, j]:
+    #                 topk[i, j, k] = x[i, j, k]
+    #     topk = torch.reshape(topk, (B, C, H, W))
+    #     return topk
+
     def get_topk(self, x, n=4):
         B, C, H, W = x.size()
         x = torch.reshape(x, (B, C, H * W))
@@ -357,7 +392,6 @@ class Classifier(nn.Module):
     def forward(self, x, labels=None):
 
         training = self.training
-
         if training:
             vox = self.quantization_layer.forward(x)
             vox_cropped = self.crop_and_resize_to_resolution(vox, self.crop_dimension)

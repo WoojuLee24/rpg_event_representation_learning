@@ -37,8 +37,9 @@ def FLAGS():
     parser.add_argument("--save_every_n_epochs", type=int, default=5)
 
     # network architecture
+    parser.add_argument("--voxel_channel", type=int, default=9)
     parser.add_argument("--value_layer", type=str, default="ValueLayer")
-    parser.add_argument("--projection", type=str, default="")
+    parser.add_argument("--projection", type=str, default=None)
 
 
     # adv attack options
@@ -102,7 +103,7 @@ if __name__ == '__main__':
     validation_loader = Loader(validation_dataset, flags, device=flags.device)
 
     # model, and put to device
-    model = Classifier(value_layer=flags.value_layer, projection=flags.projection,
+    model = Classifier(voxel_dimension=(flags.voxel_channel, 180, 240), value_layer=flags.value_layer, projection=flags.projection,
                        adv=flags.adv, epsilon=flags.epsilon, num_iter=flags.num_iter, step_size=flags.step_size)
     model = model.to(flags.device)
 
