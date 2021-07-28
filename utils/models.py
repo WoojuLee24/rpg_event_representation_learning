@@ -144,10 +144,6 @@ class QuantizationLayer(nn.Module):
         # get values for each channel
         x, y, t, p, b = events.t()
 
-        # normalizing timestamps
-        for bi in range(B):
-            t[events[:,-1] == bi] /= t[events[:,-1] == bi].max()
-
         p = (p+1)/2  # maps polarity to 0, 1
 
         idx_before_bins = x \
@@ -157,11 +153,6 @@ class QuantizationLayer(nn.Module):
                           + W * H * C * 2 * b
 
         if C == 1:
-            # values = t * self.value_layer.forward(t)
-            # if values == t:
-            #     print("same")
-            # else:
-            #     print("not same")
             values = t
             idx = idx_before_bins
             vox.put_(idx.long(), values, accumulate=True)
@@ -222,7 +213,7 @@ class QuantizationLayer(nn.Module):
         return vox
 
 
-class Classifier(nn.Module):
+class ETSNet(nn.Module):
     def __init__(self,
                  voxel_dimension=(9,180,240),  # dimension of voxel will be C x 2 x H x W
                  crop_dimension=(224, 224),  # dimension of crop before it goes into classifier
@@ -232,8 +223,6 @@ class Classifier(nn.Module):
                  value_layer="ValueLayer",
                  projection=None,
                  pretrained=True,
-                 adv=False,
-                 adv_test=False,
                  epsilon=4,
                  num_iter=2,
                  step_size=0.5):
@@ -242,10 +231,9 @@ class Classifier(nn.Module):
         self.quantization_layer = QuantizationLayer(voxel_dimension, mlp_layers, activation, value_layer, projection)
         self.classifier = resnet34(pretrained=pretrained)
 
+        self.voxel_dimension = voxel_dimension
         self.crop_dimension = crop_dimension
         self.num_classes = num_classes
-        self.adv = adv
-        self.adv_test = adv_test
         self.epsilon = epsilon
         self.num_iter = num_iter
         self.step_size = step_size
@@ -261,6 +249,64 @@ class Classifier(nn.Module):
         self.classifier.conv1 = nn.Conv2d(input_channels, 64, kernel_size=7, stride=2, padding=3, bias=False)
         self.classifier.fc = nn.Linear(self.classifier.fc.in_features, num_classes)
 
+
+    def trilinear_kernel(self, ts, num_channels):
+        ts = ts[None, ..., None]
+        gt_values = torch.zeros_like(ts)
+
+        gt_values[ts > 0] = (1 - (num_channels - 1) * ts)[ts > 0]
+        gt_values[ts < 0] = ((num_channels - 1) * ts + 1)[ts < 0]
+
+        if num_channels == 1:
+            gt_values[ts < -1.0] = 0
+            gt_values[ts > 1.0] = 0
+        else:
+            gt_values[ts < -1.0 / (num_channels - 1)] = 0
+            gt_values[ts > 1.0 / (num_channels - 1)] = 0
+        gt_values = gt_values.squeeze()
+        return gt_values
+
+    def quantize_layer(self, events, voxel_dimension):
+        # , mlp_layers, activation, value_layer, projection
+        # mlp_layers=[1, 100, 100, 1],
+        #                  activation=nn.LeakyReLU(negative_slope=0.1),
+        #                  value_layer="ValueLayer",
+        #                  projection=None
+
+        # points is a list, since events can have any size
+        B = int((1 + events[-1, -1]).item())
+        num_voxels = int(2 * np.prod(voxel_dimension) * B)
+        vox = events[0].new_full([num_voxels, ], fill_value=0)
+        C, H, W = voxel_dimension
+
+        # get values for each channel
+        x, y, t, p, b = events.t()
+        p = (p + 1) / 2  # maps polarity to 0, 1
+
+        idx_before_bins = x \
+                          + W * y \
+                          + 0 \
+                          + W * H * C * p \
+                          + W * H * C * 2 * b
+
+        if C == 1:
+            values = t
+            idx = idx_before_bins
+            vox.put_(idx.long(), values, accumulate=True)
+        else:
+            for i_bin in range(C):
+                # values = t * self.value_layer.forward(t - i_bin / (C - 1))
+                values = t * self.trilinear_kernel(t - i_bin / (C - 1), num_channels=C)
+                # draw in voxel grid
+                idx = idx_before_bins + W * H * i_bin
+                vox.put_(idx.detach().long(), values, accumulate=True)
+
+        # vox = vox.view(-1, 2, C, H, W)
+        # vox = torch.cat([vox[:, 0, ...], vox[:, 1, ...]], 1)
+        vox = vox.view(-1, 2*C, H, W)
+        return vox
+
+
     def crop_and_resize_to_resolution(self, x, output_resolution=(224, 224)):
         B, C, H, W = x.shape
         if H > W:
@@ -274,159 +320,102 @@ class Classifier(nn.Module):
 
         return x
 
-    def pgd_attack(self, image_clean, label, num_iter=2, step_size=0.1, epsilon=4, original=False):
-        if original:
-            target_label = label  # untargeted
-        else:
-            target_label = self._create_random_target(label)  # targeted
+    # def forward(self, x):
+    #     vox = self.quantization_layer.forward(x)
+    #     vox_cropped = self.crop_and_resize_to_resolution(vox, self.crop_dimension)
+    #     pred = self.classifier.forward(vox_cropped)
+    #     return pred, vox
 
-        adv = image_clean.clone().detach()
-        adv.requires_grad = True
-        for i in range(num_iter):
+    def _forward_impl(self, x):
+        vox = self.quantization_layer.forward(x)
+        vox_cropped = self.crop_and_resize_to_resolution(vox, self.crop_dimension)
+        pred = self.classifier.forward(vox_cropped)
+        return pred
 
-            pred = self.classifier.forward(adv)
-            losses, accuracy = cross_entropy_loss_and_accuracy(pred, target_label)
-            g = torch.autograd.grad(losses, adv,
-                                    retain_graph=False, create_graph=False)[0]
+    # def _forward_impl(self, x):
+    #     vox = self.quantize_layer(x, self.voxel_dimension)
+    #     vox_cropped = self.crop_and_resize_to_resolution(vox, self.crop_dimension)
+    #     pred = self.classifier.forward(vox_cropped)
+    #     return pred
 
-            g_topk = self.get_topk(g, epsilon)
-            # g_topk = g
-            if self.projection != "polarity":
-                g_topk = self.apply_polarity_constraint(g_topk)
 
-            # Linf step
-            if original:
-                adv = adv + torch.sign(g_topk) * step_size  # untargeted
-            else:
-                adv = adv - torch.sign(g_topk) * step_size  # targeted
+class AdvETSNet(ETSNet):
+    def __init__(self,
+                 voxel_dimension=(9,180,240),  # dimension of voxel will be C x 2 x H x W
+                 crop_dimension=(224, 224),  # dimension of crop before it goes into classifier
+                 num_classes=101,
+                 mlp_layers=[1, 30, 30, 1],
+                 activation=nn.LeakyReLU(negative_slope=0.1),
+                 value_layer="ValueLayer",
+                 projection=None,
+                 pretrained=True,
+                 adv=False,
+                 adv_test=False):
+        super().__init__(voxel_dimension, crop_dimension, num_classes, mlp_layers, activation, value_layer, projection, pretrained)
+        self.adv = adv
+        self.adv_test = adv_test
 
-            # # Linf step
-            # if original:
-            #     adv = adv + g_topk * step_size  # untargeted
-            # else:
-            #     adv = adv - g_topk * step_size  # targeted
+    def set_attacker(self, attacker):
+        self.attacker = attacker
 
-            # Linf project for time??
-
-        return adv.detach(), target_label
-
-    def random_attack(self, image_clean, label, num_iter=2, step_size=0.1, epsilon=4, original=False):
-        if original:
-            target_label = label  # untargeted
-        else:
-            target_label = self._create_random_target(label)  # targeted
-
-        adv = image_clean.clone().detach()
-        adv.requires_grad = True
-        for i in range(num_iter):
-            pred = self.classifier.forward(adv)
-            losses, accuracy = cross_entropy_loss_and_accuracy(pred, target_label)
-            g = torch.autograd.grad(losses, adv,
-                                    retain_graph=False, create_graph=False)[0]
-
-            g_randk = self.get_randk(g, epsilon)
-            g_randk = self.apply_polarity_constraint(g_randk)
-            # Linf step
-            if original:
-                adv = adv + torch.sign(g_randk) * step_size  # untargeted
-            else:
-                adv = adv - torch.sign(g_randk) * step_size  # targeted
-
-            # Linf project for time??
-
-        return adv, target_label
-
-    def _create_random_target(self, label):
-        label_offset = torch.randint_like(label, low=0, high=self.num_classes)
-        return (label + label_offset) % self.num_classes
-
-    # def get_topk(self, x, n=4):
-    #     B, C, H, W = x.size()
-    #     x = torch.reshape(x, (B, C, H * W))
-    #     #         topk = torch.zeros(B, C, H*W)
-    #     topk = torch.zeros_like(x)
-    #     _, idx, = torch.topk(torch.abs(x), n)
-    #     for i in range(B):
-    #         for j in range(C):
-    #             for k in idx[i, j]:
-    #                 topk[i, j, k] = x[i, j, k]
-    #     topk = torch.reshape(topk, (B, C, H, W))
-    #     return topk
-
-    def get_topk(self, x, n=4):
-        B, C, H, W = x.size()
-        x = torch.reshape(x, (B, C, H * W))
-        #         topk = torch.zeros(B, C, H*W)
-        topk = torch.zeros_like(x)
-        _, idx, = torch.topk(torch.abs(x), n)
-        for i in range(B):
-            for j in range(C):
-                for k in idx[i, j]:
-                    topk[i, j, k] = x[i, j, k]
-        topk = torch.reshape(topk, (B, C, H, W))
-        return topk
-
-    def get_randk(self, x, n=4):
-        B, C, H, W = x.size()
-        x = torch.reshape(x, (B, C, H * W))
-        #         topk = torch.zeros(B, C, H*W)
-        topk = torch.zeros_like(x)
-        _, idx, = torch.topk(x, n)
-        for i in range(B):
-            for j in range(C):
-                for _ in idx[i, j]:
-                    l = torch.randint(low=0, high=H * W - 1, size=(1,))
-                    topk[i, j, l] = x[i, j, l]
-        topk = torch.reshape(topk, (B, C, H, W))
-        return topk
-
-    def apply_polarity_constraint(self, x):
-        B, C, H, W = x.size()
-        p = x[:, :C // 2, :, :]
-        n = x[:, C // 2:, :, :]
-        p = torch.where(torch.abs(p) == torch.abs(n), torch.zeros_like(p), p)
-        x = torch.cat((p, n), dim=1)
-
-        return x
-
-    def forward(self, x, labels=None):
-
+    def forward(self, x, labels):
         training = self.training
         if training:
-            vox = self.quantization_layer.forward(x)
-            vox_cropped = self.crop_and_resize_to_resolution(vox, self.crop_dimension)
-            if self.adv == True:
-                self.classifier.eval()
-                adv, target_label = self.pgd_attack(vox_cropped, labels,
-                                                    self.num_iter, self.step_size, self.epsilon)
-                vox_cropped = torch.cat((vox_cropped, adv), dim=0)
-                labels = torch.cat((labels, labels), dim=0)
-                self.classifier.train()
-                pred = self.classifier.forward(vox_cropped)
-                return pred, labels
+            self.eval()
+            if self.adv == False:
+                images = x
+                targets = labels
             else:
-                pred = self.classifier.forward(vox_cropped)
-                return pred, labels
+                adv_images, _ = self.attacker.pgd_attack(x, labels, self)
+                targets = labels
+                adv_images[:, 4] += (x[-1, -1] + 1) # adv batch_size
+                images = torch.cat([x, adv_images], dim=0)
+                targets = torch.cat([labels, labels], dim=0)
+            self.train()
+            return self._forward_impl(images), targets
         else:
-            vox = self.quantization_layer.forward(x)
-            vox_cropped = self.crop_and_resize_to_resolution(vox, self.crop_dimension)
-            if self.adv_test == True:
-                self.classifier.eval()
-                with torch.no_grad():
-                    pred = self.classifier.forward(vox_cropped)
+            images = x
+            targets = labels
+            return self._forward_impl(images), targets
 
-                adv, target_label = self.pgd_attack(vox_cropped, labels,
-                                                    self.num_iter, self.step_size, self.epsilon)
-                with torch.no_grad():
-                    adv_pred = self.classifier.forward(adv)
-                return (pred, adv_pred), (labels, target_label)
-            else:
-                pred = self.classifier.forward(vox_cropped)
-                return pred, labels
-            # vox = self.quantization_layer.forward(x)
-            # vox_cropped = self.crop_and_resize_to_resolution(vox, self.crop_dimension)
-            # pred = self.classifier.forward(vox_cropped)
-            return pred, labels
+    # def forward(self, x, labels=None):
+    #
+    #     training = self.training
+    #     if training:
+    #         vox = self.quantization_layer.forward(x)
+    #         vox_cropped = self.crop_and_resize_to_resolution(vox, self.crop_dimension)
+    #         if self.adv == True:
+    #             self.classifier.eval()
+    #             adv, target_label = self.pgd_attack(vox_cropped, labels,
+    #                                                 self.num_iter, self.step_size, self.epsilon)
+    #             vox_cropped = torch.cat((vox_cropped, adv), dim=0)
+    #             labels = torch.cat((labels, labels), dim=0)
+    #             self.classifier.train()
+    #             pred = self.classifier.forward(vox_cropped)
+    #             return pred, labels
+    #         else:
+    #             pred = self.classifier.forward(vox_cropped)
+    #             return pred, labels
+    #     else:
+    #         vox = self.quantization_layer.forward(x)
+    #         vox_cropped = self.crop_and_resize_to_resolution(vox, self.crop_dimension)
+    #         if self.adv_test == True:
+    #             self.classifier.eval()
+    #             with torch.no_grad():
+    #                 pred = self.classifier.forward(vox_cropped)
+    #
+    #             adv, target_label = self.pgd_attack(vox_cropped, labels,
+    #                                                 self.num_iter, self.step_size, self.epsilon)
+    #             with torch.no_grad():
+    #                 adv_pred = self.classifier.forward(adv)
+    #             return (pred, adv_pred), (labels, target_label)
+    #         else:
+    #             pred = self.classifier.forward(vox_cropped)
+    #             return pred, labels
+    #         # vox = self.quantization_layer.forward(x)
+    #         # vox_cropped = self.crop_and_resize_to_resolution(vox, self.crop_dimension)
+    #         # pred = self.classifier.forward(vox_cropped)
+    #         return pred, labels
 
 # class Classifier(nn.Module):
 #     def __init__(self,
