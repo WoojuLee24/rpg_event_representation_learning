@@ -47,9 +47,9 @@ class NCaltech101:
         label = self.labels[idx]
         f = self.files[idx]
         events = np.load(f).astype(np.float32)
-
         if self.augmentation:
             events = random_shift_events(events)
             events = random_flip_events_along_x(events)
-
+        # normalizing time stamps
+        events[:, 2] = events[:, 2] / events[:, 2].max(axis=0)
         return events, label
