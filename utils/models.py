@@ -350,10 +350,12 @@ class AdvETSNet(ETSNet):
                  projection=None,
                  pretrained=True,
                  adv=False,
-                 adv_test=False):
+                 adv_test=False,
+                 attack_mode='event'):
         super().__init__(voxel_dimension, crop_dimension, num_classes, mlp_layers, activation, value_layer, projection, pretrained)
         self.adv = adv
         self.adv_test = adv_test
+        self.attack_mode = attack_mode
 
     def set_attacker(self, attacker):
         self.attacker = attacker
@@ -366,11 +368,13 @@ class AdvETSNet(ETSNet):
                 images = x
                 targets = labels
             else:
-                adv_images, _ = self.attacker.pgd_attack(x, labels, self)
-                targets = labels
-                adv_images[:, 4] += (x[-1, -1] + 1) # adv batch_size
-                images = torch.cat([x, adv_images], dim=0)
-                targets = torch.cat([labels, labels], dim=0)
+                adv_images, _ = self.attacker.attack(x, labels, self, mode=self.attack_mode)
+                with torch.no_grad():
+                    adv_images[:, 4] += (x[-1, -1] + 1) # adv batch_size
+                    images = torch.cat([x, adv_images], dim=0)
+                    targets = torch.cat([labels, labels], dim=0)
+                # images = adv_images
+                # targets = labels
             self.train()
             return self._forward_impl(images), targets
         else:

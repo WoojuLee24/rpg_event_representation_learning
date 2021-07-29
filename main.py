@@ -23,6 +23,7 @@ def FLAGS():
     # training / validation dataset
     parser.add_argument("--validation_dataset", default="", required=True)
     parser.add_argument("--training_dataset", default="", required=True)
+    parser.add_argument("--dataset", default="N-Caltech", required=False)
 
     # logging options
     parser.add_argument("--log_dir", default="", required=True)
@@ -46,10 +47,13 @@ def FLAGS():
 
     # adv attack options
     parser.add_argument("--adv", type=bool, default=False)
+    parser.add_argument("--attack_mode", type=str, default='event')
     parser.add_argument("--adv_test", type=bool, default=False)
     parser.add_argument("--epsilon", type=int, default=10)
     parser.add_argument("--num_iter", type=int, default=2)
     parser.add_argument("--step_size", type=float, default=0.5)
+    parser.add_argument("--event_step_size", type=float, default=0.5)
+
 
     flags = parser.parse_args()
 
@@ -96,8 +100,7 @@ def create_image(representation):
 
 if __name__ == '__main__':
     flags = FLAGS()
-
-
+    torch.cuda.empty_cache()
 
     # datasets, add augmentation to training set
     training_dataset = NCaltech101(flags.training_dataset, augmentation=True)
@@ -110,9 +113,11 @@ if __name__ == '__main__':
     # model, and put to device
     # model = Classifier(voxel_dimension=(flags.voxel_channel, 180, 240), value_layer=flags.value_layer, projection=flags.projection,
     #                    adv=flags.adv, epsilon=flags.epsilon, num_iter=flags.num_iter, step_size=flags.step_size)
-    model = AdvETSNet(value_layer="ValueLayer", projection=None, pretrained=True, adv=flags.adv, adv_test=flags.adv_test)
+    model = AdvETSNet(value_layer="ValueLayer", projection=None, pretrained=True,
+                      adv=flags.adv, adv_test=flags.adv_test, attack_mode=flags.attack_mode)
     if flags.adv == True:
-        attacker = PGDAttacker(num_iter=flags.num_iter, epsilon=flags.epsilon, step_size=flags.step_size,
+        attacker = PGDAttacker(num_iter=flags.num_iter, epsilon=flags.epsilon,
+                               step_size=flags.step_size, event_step_size=flags.event_step_size,
                                num_classes=101, targeted=False)
         model.set_attacker(attacker)
     model = model.to(flags.device)
