@@ -98,6 +98,83 @@ def create_image(representation):
     return representation
 
 
+def train_epoch(model, train_loader, optimizer, lr_scheduler, epoch):
+
+    sum_accuracy = 0
+    sum_loss = 0
+
+    model = model.train()
+    print(f"Training step [{epoch:3d}/{flags.num_epochs:3d}]")
+    for events, labels in tqdm.tqdm(train_loader):
+        optimizer.zero_grad()
+        pred_labels, labels = model(events, labels)
+        loss, accuracy = cross_entropy_loss_and_accuracy(pred_labels, labels)
+        loss.backward()
+        optimizer.step()
+        sum_accuracy += accuracy
+        sum_loss += loss
+
+    if epoch % 10 == 9:
+        lr_scheduler.step()
+
+    training_loss = sum_loss.item() / len(training_loader)
+    training_accuracy = sum_accuracy.item() / len(training_loader)
+    print(f"Training Iteration {epoch:5d}  Loss {training_loss:.4f}  Accuracy {training_accuracy:.4f}")
+
+    return training_loss, training_accuracy
+
+
+def test_epoch(model, val_loader, epoch):
+    sum_accuracy = 0
+    sum_loss = 0
+    model = model.eval()
+
+    print(f"Validation step [{epoch:3d}/{flags.num_epochs:3d}]")
+    for events, labels in tqdm.tqdm(val_loader):
+        with torch.no_grad():
+            pred_labels, labels = model(events, labels)
+            loss, accuracy = cross_entropy_loss_and_accuracy(pred_labels, labels)
+
+        sum_accuracy += accuracy
+        sum_loss += loss
+    validation_loss = sum_loss.item() / len(validation_loader)
+    validation_accuracy = sum_accuracy.item() / len(validation_loader)
+
+    return validation_loss, validation_accuracy
+
+
+def test_epoch_adv(model, val_loader):
+
+    sum_accuracy = 0
+    sum_adv_accuracy = 0
+    sum_correct_num = 0
+    sum_attack_num = 0
+    sum_loss = 0
+    model = model.eval()
+
+    for events, labels in tqdm.tqdm(val_loader):
+        pred_labels, labels = model(events, labels)
+        (pred, adv_pred), (labels, target_label) = pred_labels, labels
+        loss, accuracy, adv_accuracy, correct_num, attack_num = \
+            adv_cross_entropy_loss_and_accuracy(pred, adv_pred, labels, target_label)
+
+        sum_accuracy += accuracy
+        sum_adv_accuracy += adv_accuracy
+        sum_correct_num += correct_num
+        sum_attack_num += attack_num
+        sum_loss += loss
+
+    validation_loss = sum_loss.item() / len(validation_loader)
+    validation_accuracy = sum_accuracy.item() / len(validation_loader)
+    adv_validation_accuracy = sum_adv_accuracy.item() / len(validation_loader)
+    attack_validation_accuracy = sum_attack_num.item() / sum_correct_num.item()
+
+    print(f"Validation Loss {validation_loss:.4f}  Accuracy {validation_accuracy:.4f} ")
+    print(f"Adv Accuracy {adv_validation_accuracy:.4f}  Attack Accuracy {attack_validation_accuracy:.4f} ")
+
+    return validation_loss, validation_accuracy, adv_validation_accuracy, attack_validation_accuracy
+
+
 if __name__ == '__main__':
     flags = FLAGS()
     torch.cuda.empty_cache()
@@ -138,72 +215,23 @@ if __name__ == '__main__':
         start_epoch = checkpoint["epoch"]
         optimizer = optimizer.load_state_dict(checkpoint["optimizer"])
 
-
-    for i in range(start_epoch, flags.num_epochs):
-
-        sum_accuracy = 0
-        sum_loss = 0
-        if flags.adv_test == False:
-            model = model.train()
-            print(f"Training step [{i:3d}/{flags.num_epochs:3d}]")
-            for events, labels in tqdm.tqdm(training_loader):
-                optimizer.zero_grad()
-
-                pred_labels, labels = model(events, labels)
-                loss, accuracy = cross_entropy_loss_and_accuracy(pred_labels, labels)
-
-                loss.backward()
-
-                optimizer.step()
-
-                sum_accuracy += accuracy
-                sum_loss += loss
-
-                iteration += 1
-
-            if i % 10 == 9:
-                lr_scheduler.step()
-
-            training_loss = sum_loss.item() / len(training_loader)
-            training_accuracy = sum_accuracy.item() / len(training_loader)
-            print(f"Training Iteration {iteration:5d}  Loss {training_loss:.4f}  Accuracy {training_accuracy:.4f}")
-
-            writer.add_scalar("training/accuracy", training_accuracy, iteration)
-            writer.add_scalar("training/loss", training_loss, iteration)
-
-            # representation_vizualization = create_image(representation)
-            # writer.add_image("training/representation", representation_vizualization, iteration)
-
-        sum_accuracy = 0
-        sum_loss = 0
-        model = model.eval()
-
-        print(f"Validation step [{i:3d}/{flags.num_epochs:3d}]")
-        for events, labels in tqdm.tqdm(validation_loader):
-            if flags.adv_test:
-                pred_labels, labels = model(events, labels)
-                (pred, adv_pred), (labels, target_label) = pred_labels, labels
-                loss, accuracy, adv_accuracy, correct_num, attack_num = \
-                    adv_cross_entropy_loss_and_accuracy(pred, adv_pred, labels, target_label)
-
-            with torch.no_grad():
-                pred_labels, labels = model(events, labels)
-                loss, accuracy = cross_entropy_loss_and_accuracy(pred_labels, labels)
-
-            sum_accuracy += accuracy
-            sum_loss += loss
-
-        validation_loss = sum_loss.item() / len(validation_loader)
-        validation_accuracy = sum_accuracy.item() / len(validation_loader)
+    if flags.adv_test:
+        validation_loss, validation_accuracy, adv_validation_accuracy, attack_validation_accuracy = \
+            test_epoch_adv(model, validation_loader)
 
         writer.add_scalar("validation/accuracy", validation_accuracy, iteration)
+        writer.add_scalar("validation/adv_accuracy", adv_validation_accuracy, iteration)
+        writer.add_scalar("validation/attack_accuracy", attack_validation_accuracy, iteration)
         writer.add_scalar("validation/loss", validation_loss, iteration)
 
-        # # visualize representation
-        # representation_vizualization = create_image(representation)
-        # writer.add_image("validation/representation", representation_vizualization, iteration)
+    for epoch in range(start_epoch, flags.num_epochs):
+        training_loss, training_accuracy = train_epoch(model, training_loader, optimizer, lr_scheduler, epoch)
+        writer.add_scalar("training/accuracy", training_accuracy, iteration)
+        writer.add_scalar("training/loss", training_loss, iteration)
 
-        print(f"Validation Loss {validation_loss:.4f}  Accuracy {validation_accuracy:.4f}")
+        validation_loss, validation_accuracy = test_epoch(model, val_loader, epoch)
+        writer.add_scalar("validation/accuracy", validation_accuracy, iteration)
+        writer.add_scalar("validation/loss", validation_loss, iteration)
 
         if validation_loss < min_validation_loss:
             min_validation_loss = validation_loss
@@ -212,19 +240,110 @@ if __name__ == '__main__':
             torch.save({
                 "state_dict": state_dict,
                 "min_val_loss": min_validation_loss,
-                "iteration": iteration,
+                "epoch": epoch,
                 "optimizer": optimizer.state_dict(),
             }, flags.log_dir + "/model_best.pth")
             print("New best at ", validation_loss)
 
-        if i % flags.save_every_n_epochs == 0:
+        if epoch % flags.save_every_n_epochs == 0:
             state_dict = model.state_dict()
             torch.save({
                 "state_dict": state_dict,
                 "min_val_loss": min_validation_loss,
-                "iteration": iteration,
+                "epoch": epoch,
                 "optimizer": optimizer.state_dict(),
             }, flags.log_dir + "/checkpoint_%05d_%.4f.pth" % (iteration, min_validation_loss))
 
-def train_epoch(train_loader, model, loss_fun, optimizer, cur_epoch):
+
+
+    # for i in range(start_epoch, flags.num_epochs):
+    #
+    #     sum_accuracy = 0
+    #     sum_loss = 0
+    #     if flags.adv_test == False:
+    #         model = model.train()
+    #         print(f"Training step [{i:3d}/{flags.num_epochs:3d}]")
+    #         for events, labels in tqdm.tqdm(training_loader):
+    #             optimizer.zero_grad()
+    #
+    #             pred_labels, labels = model(events, labels)
+    #             loss, accuracy = cross_entropy_loss_and_accuracy(pred_labels, labels)
+    #
+    #             loss.backward()
+    #
+    #             optimizer.step()
+    #
+    #             sum_accuracy += accuracy
+    #             sum_loss += loss
+    #
+    #             iteration += 1
+    #
+    #         if i % 10 == 9:
+    #             lr_scheduler.step()
+    #
+    #         training_loss = sum_loss.item() / len(training_loader)
+    #         training_accuracy = sum_accuracy.item() / len(training_loader)
+    #         print(f"Training Iteration {iteration:5d}  Loss {training_loss:.4f}  Accuracy {training_accuracy:.4f}")
+    #
+    #         writer.add_scalar("training/accuracy", training_accuracy, iteration)
+    #         writer.add_scalar("training/loss", training_loss, iteration)
+    #
+    #         # representation_vizualization = create_image(representation)
+    #         # writer.add_image("training/representation", representation_vizualization, iteration)
+    #
+    #     sum_accuracy = 0
+    #     sum_loss = 0
+    #     model = model.eval()
+    #
+    #     print(f"Validation step [{i:3d}/{flags.num_epochs:3d}]")
+    #     for events, labels in tqdm.tqdm(validation_loader):
+    #         if flags.adv_test:
+    #             pred_labels, labels = model(events, labels)
+    #             (pred, adv_pred), (labels, target_label) = pred_labels, labels
+    #             loss, accuracy, adv_accuracy, correct_num, attack_num = \
+    #                 adv_cross_entropy_loss_and_accuracy(pred, adv_pred, labels, target_label)
+    #
+    #         with torch.no_grad():
+    #             pred_labels, labels = model(events, labels)
+    #             loss, accuracy = cross_entropy_loss_and_accuracy(pred_labels, labels)
+    #
+    #         sum_accuracy += accuracy
+    #         sum_loss += loss
+    #
+    #     validation_loss = sum_loss.item() / len(validation_loader)
+    #     validation_accuracy = sum_accuracy.item() / len(validation_loader)
+    #
+    #     writer.add_scalar("validation/accuracy", validation_accuracy, iteration)
+    #     writer.add_scalar("validation/loss", validation_loss, iteration)
+    #
+    #     # # visualize representation
+    #     # representation_vizualization = create_image(representation)
+    #     # writer.add_image("validation/representation", representation_vizualization, iteration)
+    #
+    #     print(f"Validation Loss {validation_loss:.4f}  Accuracy {validation_accuracy:.4f}")
+    #
+    #     if validation_loss < min_validation_loss:
+    #         min_validation_loss = validation_loss
+    #         state_dict = model.state_dict()
+    #
+    #         torch.save({
+    #             "state_dict": state_dict,
+    #             "min_val_loss": min_validation_loss,
+    #             "iteration": iteration,
+    #             "optimizer": optimizer.state_dict(),
+    #         }, flags.log_dir + "/model_best.pth")
+    #         print("New best at ", validation_loss)
+    #
+    #     if i % flags.save_every_n_epochs == 0:
+    #         state_dict = model.state_dict()
+    #         torch.save({
+    #             "state_dict": state_dict,
+    #             "min_val_loss": min_validation_loss,
+    #             "iteration": iteration,
+    #             "optimizer": optimizer.state_dict(),
+    #         }, flags.log_dir + "/checkpoint_%05d_%.4f.pth" % (iteration, min_validation_loss))
+
+
+
+
 

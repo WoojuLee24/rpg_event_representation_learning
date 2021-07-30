@@ -363,101 +363,56 @@ class AdvESTNet(ESTNet):
     def forward(self, x, labels):
         training = self.training
         if training:
-            self.eval()
-            # ordinary training
-            if self.adv == False:
-                images = x
-                targets = labels
-            # adversarial training
-            else:
+            if self.adv == True:
+                self.eval()
                 adv_images, _ = self.attacker.attack(x, labels, self, mode=self.attack_mode)
                 with torch.no_grad():
-                    adv_images[:, 4] += (x[-1, -1] + 1) # adv batch_size
-                    images = torch.cat([x, adv_images], dim=0)
-                    targets = torch.cat([labels, labels], dim=0)
-            self.train()
-            return self._forward_impl(images), targets
+                    adv_images[:, 4] += (x[-1, -1] + 1)  # adv batch_size
+                    x = torch.cat([x, adv_images], dim=0)
+                    labels = torch.cat([labels, labels], dim=0)
+                self.train()
+                return self._forward_impl(x), labels
+            else:
+                self.train()
+                return self._forward_impl(x), labels
         else:
-            #3 
-            images = x
-            targets = labels
-            return self._forward_impl(images), targets
+            # adv_test
+            if self.adv_test == True:
+                adv_images, target_labels = self.attacker.attack(x, labels, self, mode=self.attack_mode)
+                with torch.no_grad():
+                    pred = self._forward_impl(x)
+                    adv_pred = self._forward_impl(adv_images)
+                return (pred, adv_pred), (labels, target_labels)
+            else:
+                return self._forward_impl(x), labels
 
-    # def forward(self, x, labels=None):
-    #
-    #     training = self.training
-    #     if training:
-    #         vox = self.quantization_layer.forward(x)
-    #         vox_cropped = self.crop_and_resize_to_resolution(vox, self.crop_dimension)
-    #         if self.adv == True:
-    #             self.classifier.eval()
-    #             adv, target_label = self.pgd_attack(vox_cropped, labels,
-    #                                                 self.num_iter, self.step_size, self.epsilon)
-    #             vox_cropped = torch.cat((vox_cropped, adv), dim=0)
-    #             labels = torch.cat((labels, labels), dim=0)
-    #             self.classifier.train()
-    #             pred = self.classifier.forward(vox_cropped)
-    #             return pred, labels
-    #         else:
-    #             pred = self.classifier.forward(vox_cropped)
-    #             return pred, labels
-    #     else:
-    #         vox = self.quantization_layer.forward(x)
-    #         vox_cropped = self.crop_and_resize_to_resolution(vox, self.crop_dimension)
-    #         if self.adv_test == True:
-    #             self.classifier.eval()
-    #             with torch.no_grad():
-    #                 pred = self.classifier.forward(vox_cropped)
-    #
-    #             adv, target_label = self.pgd_attack(vox_cropped, labels,
-    #                                                 self.num_iter, self.step_size, self.epsilon)
-    #             with torch.no_grad():
-    #                 adv_pred = self.classifier.forward(adv)
-    #             return (pred, adv_pred), (labels, target_label)
-    #         else:
-    #             pred = self.classifier.forward(vox_cropped)
-    #             return pred, labels
-    #         # vox = self.quantization_layer.forward(x)
-    #         # vox_cropped = self.crop_and_resize_to_resolution(vox, self.crop_dimension)
-    #         # pred = self.classifier.forward(vox_cropped)
-    #         return pred, labels
 
-# class Classifier(nn.Module):
-#     def __init__(self,
-#                  voxel_dimension=(9, 180, 240),  # dimension of voxel will be C x 2 x H x W
-#                  crop_dimension=(224, 224),  # dimension of crop before it goes into classifier
-#                  num_classes=101,
-#                  mlp_layers=[1, 30, 30, 1],
-#                  activation=nn.LeakyReLU(negative_slope=0.1),
-#                  pretrained=True):
-#
-#         nn.Module.__init__(self)
-#         self.quantization_layer = QuantizationLayer(voxel_dimension, mlp_layers, activation)
-#         self.classifier = resnet34(pretrained=pretrained)
-#
-#         self.crop_dimension = crop_dimension
-#
-#         # replace fc layer and first convolutional layer
-#         input_channels = 2 * voxel_dimension[0]
-#         self.classifier.conv1 = nn.Conv2d(input_channels, 64, kernel_size=7, stride=2, padding=3, bias=False)
-#         self.classifier.fc = nn.Linear(self.classifier.fc.in_features, num_classes)
-#
-#     def crop_and_resize_to_resolution(self, x, output_resolution=(224, 224)):
-#         B, C, H, W = x.shape
-#         if H > W:
-#             h = H // 2
-#             x = x[:, :, h - W // 2:h + W // 2, :]
+# def forward(self, x, labels):
+#     training = self.training
+#     if training:
+#         self.eval()
+#         # ordinary training
+#         if self.adv == False:
+#             images = x
+#             targets = labels
+#         # adversarial training
 #         else:
-#             h = W // 2
-#             x = x[:, :, :, h - H // 2:h + H // 2]
-#
-#         x = F.interpolate(x, size=output_resolution)
-#
-#         return x
-#
-#     def forward(self, x):
-#         vox = self.quantization_layer.forward(x)
-#         vox_cropped = self.crop_and_resize_to_resolution(vox, self.crop_dimension)
-#         pred = self.classifier.forward(vox_cropped)
-#         return pred, vox
-
+#             adv_images, _ = self.attacker.attack(x, labels, self, mode=self.attack_mode)
+#             with torch.no_grad():
+#                 adv_images[:, 4] += (x[-1, -1] + 1)  # adv batch_size
+#                 images = torch.cat([x, adv_images], dim=0)
+#                 targets = torch.cat([labels, labels], dim=0)
+#         self.train()
+#         return self._forward_impl(images), targets
+#     else:
+#         # adv_test
+#         if self.adv_test == True:
+#             adv_images, target_label = self.attacker.attack(x, labels, self, mode=self.attack_mode)
+#             with torch.no_grad():
+#                 pred = self._forward_impl(x)
+#                 adv_pred = self._forward_impl(adv_images)
+#             return (pred, adv_pred), (labels, target_label)
+#         else:
+#             images = x
+#             targets = labels
+#             return self._forward_impl(images), targets
