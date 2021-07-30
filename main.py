@@ -140,6 +140,8 @@ def test_epoch(model, val_loader, epoch):
     validation_loss = sum_loss.item() / len(validation_loader)
     validation_accuracy = sum_accuracy.item() / len(validation_loader)
 
+    print(f"Validation Loss {validation_loss:.4f}  Accuracy {validation_accuracy:.4f}")
+    
     return validation_loss, validation_accuracy
 
 
