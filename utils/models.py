@@ -213,7 +213,7 @@ class QuantizationLayer(nn.Module):
         return vox
 
 
-class ETSNet(nn.Module):
+class ESTNet(nn.Module):
     def __init__(self,
                  voxel_dimension=(9,180,240),  # dimension of voxel will be C x 2 x H x W
                  crop_dimension=(224, 224),  # dimension of crop before it goes into classifier
@@ -339,7 +339,7 @@ class ETSNet(nn.Module):
     #     return pred
 
 
-class AdvETSNet(ETSNet):
+class AdvESTNet(ESTNet):
     def __init__(self,
                  voxel_dimension=(9,180,240),  # dimension of voxel will be C x 2 x H x W
                  crop_dimension=(224, 224),  # dimension of crop before it goes into classifier
@@ -364,20 +364,21 @@ class AdvETSNet(ETSNet):
         training = self.training
         if training:
             self.eval()
+            # ordinary training
             if self.adv == False:
                 images = x
                 targets = labels
+            # adversarial training
             else:
                 adv_images, _ = self.attacker.attack(x, labels, self, mode=self.attack_mode)
                 with torch.no_grad():
                     adv_images[:, 4] += (x[-1, -1] + 1) # adv batch_size
                     images = torch.cat([x, adv_images], dim=0)
                     targets = torch.cat([labels, labels], dim=0)
-                # images = adv_images
-                # targets = labels
             self.train()
             return self._forward_impl(images), targets
         else:
+            #3 
             images = x
             targets = labels
             return self._forward_impl(images), targets
