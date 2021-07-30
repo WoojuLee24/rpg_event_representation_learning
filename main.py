@@ -229,7 +229,7 @@ if __name__ == '__main__':
         writer.add_scalar("training/accuracy", training_accuracy, iteration)
         writer.add_scalar("training/loss", training_loss, iteration)
 
-        validation_loss, validation_accuracy = test_epoch(model, val_loader, epoch)
+        validation_loss, validation_accuracy = test_epoch(model, validation_loader, epoch)
         writer.add_scalar("validation/accuracy", validation_accuracy, iteration)
         writer.add_scalar("validation/loss", validation_loss, iteration)
 
