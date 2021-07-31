@@ -141,7 +141,7 @@ def test_epoch(model, val_loader, epoch):
     validation_accuracy = sum_accuracy.item() / len(validation_loader)
 
     print(f"Validation Loss {validation_loss:.4f}  Accuracy {validation_accuracy:.4f}")
-    
+
     return validation_loss, validation_accuracy
 
 
@@ -212,7 +212,7 @@ if __name__ == '__main__':
     min_validation_loss = 1000
 
     if flags.checkpoint is not None:
-        checkpoint = torch.load(flags.checkpoint)
+        checkpoint = torch.load(flags.checkpoint, map_location='cuda:0')
         model.load_state_dict(checkpoint["state_dict"])
         start_epoch = checkpoint["epoch"]
         optimizer = optimizer.load_state_dict(checkpoint["optimizer"])
