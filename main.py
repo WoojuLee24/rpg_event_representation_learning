@@ -212,7 +212,7 @@ if __name__ == '__main__':
     min_validation_loss = 1000
 
     if flags.checkpoint is not None:
-        checkpoint = torch.load(flags.checkpoint, map_location=)flags.device
+        checkpoint = torch.load(flags.checkpoint, map_location=flags.device)
         model.load_state_dict(checkpoint["state_dict"])
         start_epoch = checkpoint["epoch"]
         optimizer = optimizer.load_state_dict(checkpoint["optimizer"])
