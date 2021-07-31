@@ -119,7 +119,7 @@ def train_epoch(model, train_loader, optimizer, lr_scheduler, epoch):
 
     training_loss = sum_loss.item() / len(training_loader)
     training_accuracy = sum_accuracy.item() / len(training_loader)
-    print(f"Training Iteration {epoch:5d}  Loss {training_loss:.4f}  Accuracy {training_accuracy:.4f}")
+    print(f"Training epoch {epoch:5d}  Loss {training_loss:.4f}  Accuracy {training_accuracy:.4f}")
 
     return training_loss, training_accuracy
 
@@ -149,6 +149,7 @@ def test_epoch_adv(model, val_loader):
 
     sum_accuracy = 0
     sum_adv_accuracy = 0
+    sum_adv_target_accuracy = 0
     sum_correct_num = 0
     sum_attack_num = 0
     sum_loss = 0
@@ -157,11 +158,12 @@ def test_epoch_adv(model, val_loader):
     for events, labels in tqdm.tqdm(val_loader):
         pred_labels, labels = model(events, labels)
         (pred, adv_pred), (labels, target_label) = pred_labels, labels
-        loss, accuracy, adv_accuracy, correct_num, attack_num = \
+        loss, accuracy, adv_accuracy, adv_target_accuracy, correct_num, attack_num = \
             adv_cross_entropy_loss_and_accuracy(pred, adv_pred, labels, target_label)
 
         sum_accuracy += accuracy
         sum_adv_accuracy += adv_accuracy
+        sum_adv_target_accuracy += adv_target_accuracy
         sum_correct_num += correct_num
         sum_attack_num += attack_num
         sum_loss += loss
@@ -169,12 +171,15 @@ def test_epoch_adv(model, val_loader):
     validation_loss = sum_loss.item() / len(validation_loader)
     validation_accuracy = sum_accuracy.item() / len(validation_loader)
     adv_validation_accuracy = sum_adv_accuracy.item() / len(validation_loader)
+    adv_target_validation_accuracy = sum_adv_target_accuracy.item() / len(validation_loader)
     attack_validation_accuracy = sum_attack_num.item() / sum_correct_num.item()
 
     print(f"Validation Loss {validation_loss:.4f}  Accuracy {validation_accuracy:.4f} ")
-    print(f"Adv Accuracy {adv_validation_accuracy:.4f}  Attack Accuracy {attack_validation_accuracy:.4f} ")
+    print(f"Adv Accuracy {adv_validation_accuracy:.4f} "
+          f"Adv Target Accuracy {adv_target_validation_accuracy:.4f} "
+          f"Attack Accuracy {attack_validation_accuracy:.4f} ")
 
-    return validation_loss, validation_accuracy, adv_validation_accuracy, attack_validation_accuracy
+    return validation_loss, validation_accuracy, adv_validation_accuracy, adv_target_validation_accuracy, attack_validation_accuracy
 
 
 if __name__ == '__main__':
@@ -218,22 +223,24 @@ if __name__ == '__main__':
         optimizer = optimizer.load_state_dict(checkpoint["optimizer"])
 
     if flags.adv_test:
-        validation_loss, validation_accuracy, adv_validation_accuracy, attack_validation_accuracy = \
+        validation_loss, validation_accuracy, adv_validation_accuracy, adv_target_validation_accuracy, attack_validation_accuracy = \
             test_epoch_adv(model, validation_loader)
 
         writer.add_scalar("validation/accuracy", validation_accuracy, iteration)
         writer.add_scalar("validation/adv_accuracy", adv_validation_accuracy, iteration)
+        writer.add_scalar("validation/adv_accuracy", adv_validation_accuracy, iteration)
         writer.add_scalar("validation/attack_accuracy", attack_validation_accuracy, iteration)
         writer.add_scalar("validation/loss", validation_loss, iteration)
 
+
     for epoch in range(start_epoch, flags.num_epochs):
         training_loss, training_accuracy = train_epoch(model, training_loader, optimizer, lr_scheduler, epoch)
-        writer.add_scalar("training/accuracy", training_accuracy, iteration)
-        writer.add_scalar("training/loss", training_loss, iteration)
+        writer.add_scalar("training/accuracy", training_accuracy, epoch)
+        writer.add_scalar("training/loss", training_loss, epoch)
 
         validation_loss, validation_accuracy = test_epoch(model, validation_loader, epoch)
-        writer.add_scalar("validation/accuracy", validation_accuracy, iteration)
-        writer.add_scalar("validation/loss", validation_loss, iteration)
+        writer.add_scalar("validation/accuracy", validation_accuracy, epoch)
+        writer.add_scalar("validation/loss", validation_loss, epoch)
 
         if validation_loss < min_validation_loss:
             min_validation_loss = validation_loss
@@ -254,7 +261,7 @@ if __name__ == '__main__':
                 "min_val_loss": min_validation_loss,
                 "epoch": epoch,
                 "optimizer": optimizer.state_dict(),
-            }, flags.log_dir + "/checkpoint_%05d_%.4f.pth" % (iteration, min_validation_loss))
+            }, flags.log_dir + "/checkpoint_%05d_%.4f.pth" % (epoch, min_validation_loss))
 
 
 
