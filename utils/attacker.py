@@ -112,10 +112,11 @@ class PGDAttacker():
             with torch.no_grad():
                 # Linf step
                 if self.targeted:
-                    event_adv = event_adv + torch.sign(event_g) * self.event_step_size
+                    # event_adv = event_adv + torch.sign(event_g) * self.event_step_size
+                    event_adv = event_adv + event_g * self.event_step_size
                     time_adv = time_adv + torch.sign(time_g) * self.step_size
                 else:
-                    event_adv = event_adv - torch.sign(event_g) * self.event_step_size  # targeted
+                    event_adv = event_adv - event_g * self.event_step_size  # targeted
                     time_adv = time_adv - torch.sign(time_g) * self.step_size  # targeted
 
             # Linf project
