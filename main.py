@@ -10,7 +10,7 @@ from utils.models import ESTNet, AdvESTNet
 from torch.utils.tensorboard import SummaryWriter
 from utils.loader import Loader
 from utils.loss import cross_entropy_loss_and_accuracy, adv_cross_entropy_loss_and_accuracy
-from utils.dataset import NCaltech101
+from utils.dataset import NCaltech101, NCARS, NMNIST, DVSGesture
 from utils.attacker import PGDAttacker
 
 torch.manual_seed(1)
@@ -23,7 +23,6 @@ def FLAGS():
     # training / validation dataset
     parser.add_argument("--validation_dataset", default="", required=True)
     parser.add_argument("--training_dataset", default="", required=True)
-    parser.add_argument("--dataset", default="N-Caltech", required=False)
 
     # logging options
     parser.add_argument("--log_dir", default="", required=True)
@@ -185,10 +184,30 @@ def test_epoch_adv(model, val_loader):
 if __name__ == '__main__':
     flags = FLAGS()
     torch.cuda.empty_cache()
+    dataset = (flags.training_dataset).split("/")[3]
 
-    # datasets, add augmentation to training set
-    training_dataset = NCaltech101(flags.training_dataset, augmentation=True)
-    validation_dataset = NCaltech101(flags.validation_dataset)
+    if dataset == "N-Caltech101":
+        # datasets, add augmentation to training set
+        training_dataset = NCaltech101(flags.training_dataset, augmentation=True)
+        validation_dataset = NCaltech101(flags.validation_dataset)
+        voxel_dimension = (flags.voxel_channel, 180, 240)
+        crop_dimension = (224, 224)
+    elif dataset == "NCARS":
+        # datasets, add augmentation to training set
+        training_dataset = NCARS(flags.training_dataset, augmentation=True)
+        validation_dataset = NCARS(flags.validation_dataset)
+        voxel_dimension = (flags.voxel_channel, 240, 304)
+        crop_dimension = (224, 224)
+    elif dataset == "N-MNIST":
+        training_dataset = NMNIST(flags.training_dataset, augmentation=True)
+        validation_dataset = NMNIST(flags.validation_dataset)
+        voxel_dimension = (flags.voxel_channel, 34, 34)
+        crop_dimension = (28, 28)
+    elif dataset == "DVSGesture":
+        training_dataset = DVSGesture(flags.training_dataset, augmentation=True)
+        validation_dataset = DVSGesture(flags.validation_dataset)
+        voxel_dimension = (flags.voxel_channel, 180, 240)
+        crop_dimension = (224, 224)
 
     # construct loader, handles data streaming to gpu
     training_loader = Loader(training_dataset, flags, device=flags.device)
@@ -197,12 +216,14 @@ if __name__ == '__main__':
     # model, and put to device
     # model = Classifier(voxel_dimension=(flags.voxel_channel, 180, 240), value_layer=flags.value_layer, projection=flags.projection,
     #                    adv=flags.adv, epsilon=flags.epsilon, num_iter=flags.num_iter, step_size=flags.step_size)
-    model = AdvESTNet(value_layer="ValueLayer", projection=flags.projection, pretrained=True,
+
+    model = AdvESTNet(voxel_dimension=voxel_dimension, crop_dimension=crop_dimension, num_classes=training_dataset.classes,
+                      value_layer="ValueLayer", projection=flags.projection, pretrained=True,
                       adv=flags.adv, adv_test=flags.adv_test, attack_mode=flags.attack_mode)
     if flags.adv == True:
         attacker = PGDAttacker(num_iter=flags.num_iter, epsilon=flags.epsilon,
                                step_size=flags.step_size, event_step_size=flags.event_step_size,
-                               num_classes=101, targeted=False)
+                               num_classes=training_dataset.classes, targeted=False)
         model.set_attacker(attacker)
     model = model.to(flags.device)
 

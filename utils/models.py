@@ -162,6 +162,9 @@ class QuantizationLayer(nn.Module):
 
                 # draw in voxel grid
                 idx = idx_before_bins + W * H * i_bin
+                # max_idx = idx.max()
+                # max_x = events[:, 0].max()
+                # max_y = events[:, 1].max()
                 vox.put_(idx.long(), values, accumulate=True)
 
         vox = vox.view(-1, 2, C, H, W)
@@ -170,12 +173,16 @@ class QuantizationLayer(nn.Module):
         if self.projection == None:
             pass
         elif self.projection == "polarity":
+            # voxel grid
             vox = self.project_polarity(vox)
         elif self.projection == "average_time":
+            # Two-channel image
             vox = self.project_average_time(vox)
         elif self.projection == "recent_time":
+            # Two-channel image
             vox = self.project_recent_time(vox)
         elif self.projection == "time_count":
+            # Event frame
             vox = self.project_time_count(vox)
 
         return vox
@@ -205,9 +212,11 @@ class QuantizationLayer(nn.Module):
     def project_time_count(self, vox):
         # EV-FlowNet, Event self-driving: Image of event counts
         B, C, H, W = vox.size()
-        pvox = torch.count_nonzero(vox[:, :C // 2, :, :], dim=1)
+        # pvox = torch.count_nonzero(vox[:, :C // 2, :, :], dim=1)
+        pvox = (vox[:, :C // 2, :, :] != 0).sum(dim=1).to(torch.float32)
         pvox = pvox.view(B, 1, H, W)
-        nvox = torch.count_nonzero(vox[:, C // 2:, :, :], dim=1)
+        # nvox = torch.count_nonzero(vox[:, C // 2:, :, :], dim=1)
+        nvox = (vox[:, C // 2:, :, :] != 0).sum(dim=1).to(torch.float32)
         nvox = nvox.view(B, 1, H, W)
         vox = torch.cat([pvox, nvox], 1)
         return vox
