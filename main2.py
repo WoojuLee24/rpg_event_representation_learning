@@ -163,8 +163,8 @@ def test_epoch_adv(model1, model2, attacker, val_loader):
 
     for events, labels in tqdm.tqdm(val_loader):
         adv, target_label = attacker.attack(events, labels, model1, mode='event_time')
-        adv.to("cuda: 1")
-        target_label.to("cuda: 1")
+        # adv.to("cuda: 1")
+        # target_label.to("cuda: 1")
 
         with torch.no_grad():
             pred = model2._forward_impl(events)
@@ -248,7 +248,9 @@ if __name__ == '__main__':
                                num_classes=training_dataset.classes, targeted=flags.targeted)
         model1.set_attacker(attacker)
     model1 = model1.to(flags.device)
-    model2 = model2.to("cuda:1")
+    # model2 = model2.to("cuda:1")
+    model2 = model2.to(flags.device)
+
 
     # optimizer and lr scheduler
     optimizer = torch.optim.Adam(model1.parameters(), lr=1e-4)

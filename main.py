@@ -48,6 +48,7 @@ def FLAGS():
     parser.add_argument("--adv", type=bool, default=False)
     parser.add_argument("--attack_mode", type=str, default='event')
     parser.add_argument("--adv_test", type=bool, default=False)
+    parser.add_argument("--targeted", type=bool, default=True)
     parser.add_argument("--epsilon", type=int, default=10)
     parser.add_argument("--num_iter", type=int, default=2)
     parser.add_argument("--step_size", type=float, default=0.5)
@@ -218,12 +219,12 @@ if __name__ == '__main__':
     #                    adv=flags.adv, epsilon=flags.epsilon, num_iter=flags.num_iter, step_size=flags.step_size)
 
     model = AdvESTNet(voxel_dimension=voxel_dimension, crop_dimension=crop_dimension, num_classes=training_dataset.classes,
-                      value_layer="ValueLayer", projection=flags.projection, pretrained=True,
+                      value_layer=flags.value_layer, projection=flags.projection, pretrained=True,
                       adv=flags.adv, adv_test=flags.adv_test, attack_mode=flags.attack_mode)
     if flags.adv == True:
         attacker = PGDAttacker(num_iter=flags.num_iter, epsilon=flags.epsilon,
                                step_size=flags.step_size, event_step_size=flags.event_step_size,
-                               num_classes=training_dataset.classes, targeted=False)
+                               num_classes=training_dataset.classes, targeted=flags.targeted)
         model.set_attacker(attacker)
     model = model.to(flags.device)
 
@@ -252,6 +253,7 @@ if __name__ == '__main__':
         writer.add_scalar("validation/adv_accuracy", adv_validation_accuracy, iteration)
         writer.add_scalar("validation/attack_accuracy", attack_validation_accuracy, iteration)
         writer.add_scalar("validation/loss", validation_loss, iteration)
+        exit()
 
 
     for epoch in range(start_epoch, flags.num_epochs):

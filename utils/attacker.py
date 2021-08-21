@@ -81,9 +81,9 @@ class PGDAttacker():
 
     def pgd_attack2(self, image_clean, label, model):
         if self.targeted:
-            target_label = label
-        else:
             target_label = self._create_random_target(label)
+        else:
+            target_label = label
 
         adv = image_clean.clone().detach()
         adv = self.fill_null_event(adv, T=self.epsilon, H=180, W=240)
@@ -113,11 +113,11 @@ class PGDAttacker():
                 # Linf step
                 if self.targeted:
                     # event_adv = event_adv + torch.sign(event_g) * self.event_step_size
-                    event_adv = event_adv + event_g * self.event_step_size
-                    time_adv = time_adv + torch.sign(time_g) * self.step_size
+                    event_adv = event_adv - event_g * self.event_step_size
+                    time_adv = time_adv - torch.sign(time_g) * self.step_size
                 else:
-                    event_adv = event_adv - event_g * self.event_step_size  # targeted
-                    time_adv = time_adv - torch.sign(time_g) * self.step_size  # targeted
+                    event_adv = event_adv + event_g * self.event_step_size  # targeted
+                    time_adv = time_adv + torch.sign(time_g) * self.step_size  # targeted
 
             # Linf project
             event_adv = torch.where(event_adv < 0.5, torch.zeros_like(event_adv),
