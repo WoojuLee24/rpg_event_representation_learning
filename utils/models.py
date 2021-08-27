@@ -134,9 +134,11 @@ class QuantizationLayer(nn.Module):
         self.dim = dim
         self.projection = projection
 
+
     def forward(self, events):
         # points is a list, since events can have any size
         B = int((1+events[-1,-1]).item())
+        # B = 2
         num_voxels = int(2 * np.prod(self.dim) * B)
         vox = events[0].new_full([num_voxels,], fill_value=0)
         C, H, W = self.dim

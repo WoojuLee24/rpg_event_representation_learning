@@ -48,7 +48,7 @@ def FLAGS():
     parser.add_argument("--adv", type=bool, default=False)
     parser.add_argument("--attack_mode", type=str, default='event')
     parser.add_argument("--adv_test", type=bool, default=False)
-    parser.add_argument("--targeted", type=bool, default=True)
+    parser.add_argument("--targeted", type=bool, default=False)
     parser.add_argument("--epsilon", type=int, default=10)
     parser.add_argument("--num_iter", type=int, default=2)
     parser.add_argument("--step_size", type=float, default=0.5)
@@ -218,8 +218,8 @@ if __name__ == '__main__':
     # model = Classifier(voxel_dimension=(flags.voxel_channel, 180, 240), value_layer=flags.value_layer, projection=flags.projection,
     #                    adv=flags.adv, epsilon=flags.epsilon, num_iter=flags.num_iter, step_size=flags.step_size)
 
-    model = AdvESTNet(voxel_dimension=voxel_dimension, crop_dimension=crop_dimension, num_classes=training_dataset.classes,
-                      value_layer=flags.value_layer, projection=flags.projection, pretrained=True,
+    model = AdvESTNet(voxel_dimension=voxel_dimension, crop_dimension=crop_dimension,
+                      num_classes=training_dataset.classes, value_layer=flags.value_layer, projection=flags.projection, pretrained=True,
                       adv=flags.adv, adv_test=flags.adv_test, attack_mode=flags.attack_mode)
     if flags.adv == True:
         attacker = PGDAttacker(num_iter=flags.num_iter, epsilon=flags.epsilon,
