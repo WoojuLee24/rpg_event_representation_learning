@@ -231,11 +231,11 @@ class PGDAttacker():
 
         return null_event
 
-    def get_top_percentile(self, null_g, batch_size=4):
+    def get_top_percentile(self, null_g, batch_size):
         i = 0
         boolean_g = 0
         threshold = z_table[self.event_step_size]
-        for g in torch.split(null_g, int(null_g.shape[0]/4)):
+        for g in torch.split(null_g, int(null_g.shape[0]/batch_size)):
             if i != 0:
                 boolean_g = torch.cat([boolean_g, (g-torch.mean(g))/torch.std(g) > threshold])
             else:
