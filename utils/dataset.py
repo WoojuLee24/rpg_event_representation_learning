@@ -235,6 +235,9 @@ class NMNIST(torch.utils.data.Dataset):
         """
         events = self._read_dataset_file(self.files[idx])
         label = self.labels[idx]
+        # normalizing time stamps
+        events[:, 2] = events[:, 2] / events[:, 2].max(axis=0)
+        events[:, 3] = events[:, 3] * 2 - 1
         # if self.augmentation:
         #     events = random_shift_events(events, resolution=(28, 28))
         #     events = random_flip_events_along_x(events, resolution=(28, 28))
