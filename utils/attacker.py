@@ -11,12 +11,13 @@ z_table = {0: 100, 0.1: 3.08, 0.5: 2.57, 1: 2.33, 2: 2.05, 3: 1.88, 4: 1.75,5: 1
 
 
 class PGDAttacker():
-    def __init__(self, num_iter, epsilon, step_size, event_step_size, num_classes=101, targeted=False):
+    def __init__(self, num_iter, epsilon, step_size, event_step_size, num_classes=101, voxel_dimension=(9, 180, 240), targeted=False):
         self.num_iter = num_iter
         self.epsilon = epsilon
         self.step_size = step_size
         self.event_step_size = event_step_size
         self.num_classes = num_classes
+        self.voxel_dimension = voxel_dimension
         self.targeted = targeted
 
     def _create_random_target(self, label):
@@ -34,8 +35,9 @@ class PGDAttacker():
         x = torch.cat((p, n), dim=1)
         return x
 
-    def make_null_event(self, events, T, H, W):
+    def make_null_event(self, events, T, voxel_dimension):
         B = int((1 + events[-1, -1]).item())
+        C, H, W = voxel_dimension
         vox = torch.zeros((W, H, T, 2, B))
         null_event = (vox == 0).nonzero().float().cuda()
         null_event[:, 2] = 0
@@ -153,7 +155,7 @@ class PGDAttacker():
 
         event = image_clean.clone().detach()
 
-        null_event = self.make_null_event(event, T=self.epsilon, H=180, W=240)
+        null_event = self.make_null_event(event, T=self.epsilon, voxel_dimension=self.voxel_dimension)
         adv = torch.cat([event, null_event], dim=0)
 
         real_adv = event[:, 2]
@@ -220,8 +222,9 @@ class PGDAttacker():
 
         return adv, target_label
 
-    def make_null_event(self, events, T, H, W):
+    def make_null_event(self, events, T, voxel_dimension):
         B = int((1 + events[-1, -1]).item())
+        C, H, W = voxel_dimension
         vox = torch.zeros((W, H, T, 2, B))
         null_event = (vox == 0).nonzero().float().cuda()
         null_event[:, 2] = 0
@@ -277,7 +280,7 @@ class PGDAttacker():
 
         # Generating additional adversarial events
         event = image_clean.clone().detach()
-        null_event = self.make_null_event(event, T=self.epsilon, H=180, W=240)
+        null_event = self.make_null_event(event, T=self.epsilon, voxel_dimension=self.voxel_dimension)
         adv = torch.cat([event, null_event], dim=0)
 
         null_adv = null_event[:, 2]
@@ -297,8 +300,8 @@ class PGDAttacker():
 
         # generating additional adversarial events
         adam_adv = null_event[self.get_top_percentile(null_g, batch_size=int((1+torch.max(image_clean[:, -1])).item()))]
-        time_adv = 0.5 + 0.01 * torch.rand_like(adam_adv[:, 2]) # time_adv = 0.5* torch.ones_like(adam_adv[:, 2]) # time_adv = 0.5 + 0.05 * torch.rand_like(adam_adv[:, 2]) # time_adv = torch.rand_like(adam_adv[:, 2])  # time_adv = 0.5* torch.ones_like(adam_adv[:, 2])
-        # time_adv = torch.rand_like(adam_adv[:, 2])
+        # time_adv = 0.5 + 0.01 * torch.rand_like(adam_adv[:, 2]) # time_adv = 0.5* torch.ones_like(adam_adv[:, 2]) # time_adv = 0.5 + 0.05 * torch.rand_like(adam_adv[:, 2]) # time_adv = torch.rand_like(adam_adv[:, 2])  # time_adv = 0.5* torch.ones_like(adam_adv[:, 2])
+        time_adv = torch.rand_like(adam_adv[:, 2])
         time_adv = time_adv.detach()
         time_adv.requires_grad = True
 

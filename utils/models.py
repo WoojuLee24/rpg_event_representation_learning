@@ -164,9 +164,9 @@ class QuantizationLayer(nn.Module):
 
                 # draw in voxel grid
                 idx = idx_before_bins + W * H * i_bin
-                # max_idx = idx.max()
-                # max_x = events[:, 0].max()
-                # max_y = events[:, 1].max()
+                max_idx = idx.max()
+                max_x = events[:, 0].max()
+                max_y = events[:, 1].max()
                 vox.put_(idx.long(), values, accumulate=True)
 
         vox = vox.view(-1, 2, C, H, W)

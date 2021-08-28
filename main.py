@@ -224,7 +224,8 @@ if __name__ == '__main__':
     if flags.adv == True:
         attacker = PGDAttacker(num_iter=flags.num_iter, epsilon=flags.epsilon,
                                step_size=flags.step_size, event_step_size=flags.event_step_size,
-                               num_classes=training_dataset.classes, targeted=flags.targeted)
+                               num_classes=training_dataset.classes, voxel_dimension=voxel_dimension,
+                               targeted=flags.targeted)
         model.set_attacker(attacker)
     model = model.to(flags.device)
 
