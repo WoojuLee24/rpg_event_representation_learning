@@ -296,7 +296,7 @@ class PGDAttacker():
                 null_adv = null_adv + null_g * self.event_step_size
 
         # generating additional adversarial events
-        adam_adv = null_event[self.get_top_percentile(null_g, batch_size=int((1+image_clean[-1, -1]).item()))]
+        adam_adv = null_event[self.get_top_percentile(null_g, batch_size=int((1+torch.max(image_clean[:, -1])).item()))]
         time_adv = 0.5 + 0.01 * torch.rand_like(adam_adv[:, 2]) # time_adv = 0.5* torch.ones_like(adam_adv[:, 2]) # time_adv = 0.5 + 0.05 * torch.rand_like(adam_adv[:, 2]) # time_adv = torch.rand_like(adam_adv[:, 2])  # time_adv = 0.5* torch.ones_like(adam_adv[:, 2])
         # time_adv = torch.rand_like(adam_adv[:, 2])
         time_adv = time_adv.detach()
