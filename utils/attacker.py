@@ -280,7 +280,7 @@ class PGDAttacker():
 
         # Generating additional adversarial events
         event = image_clean.clone().detach()
-        null_event = self.make_null_event(event, T=self.epsilon, voxel_dimension=self.voxel_dimension)
+        null_event = self.make_null_event(event, 1, voxel_dimension=self.voxel_dimension)
         adv = torch.cat([event, null_event], dim=0)
 
         null_adv = null_event[:, 2]
@@ -300,6 +300,7 @@ class PGDAttacker():
 
         # generating additional adversarial events
         adam_adv = null_event[self.get_top_percentile(null_g, batch_size=int((1+torch.max(image_clean[:, -1])).item()))]
+        adam_adv = adam_adv.repeat_interleave(self.epsilon, dim=0)
         # time_adv = 0.5 + 0.01 * torch.rand_like(adam_adv[:, 2]) # time_adv = 0.5* torch.ones_like(adam_adv[:, 2]) # time_adv = 0.5 + 0.05 * torch.rand_like(adam_adv[:, 2]) # time_adv = torch.rand_like(adam_adv[:, 2])  # time_adv = 0.5* torch.ones_like(adam_adv[:, 2])
         time_adv = torch.rand_like(adam_adv[:, 2])
         time_adv = time_adv.detach()
