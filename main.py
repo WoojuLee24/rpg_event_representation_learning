@@ -243,7 +243,7 @@ if __name__ == '__main__':
         checkpoint = torch.load(flags.checkpoint, map_location=flags.device)
         model.load_state_dict(checkpoint["state_dict"])
         start_epoch = checkpoint["epoch"]
-        optimizer = optimizer.load_state_dict(checkpoint["optimizer"])
+        # optimizer = optimizer.load_state_dict(checkpoint["optimizer"])
 
     if flags.adv_test:
         validation_loss, validation_accuracy, adv_validation_accuracy, adv_target_validation_accuracy, attack_validation_accuracy = \
