@@ -392,6 +392,7 @@ class AdvESTNet(ESTNet):
                 adv_images, target_labels = self.attacker.attack(x, labels, self, mode=self.attack_mode)
                 with torch.no_grad():
                     pred = self._forward_impl(x)
+                    k = pred.argmax(1)
                     adv_pred = self._forward_impl(adv_images)
                 return (pred, adv_pred), (labels, target_labels)
             else:
