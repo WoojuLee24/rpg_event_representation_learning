@@ -552,7 +552,7 @@ class PGDAttacker():
         event = image_clean.clone().detach()
         #         null_event = self.make_null_event(event, T=self.epsilon, H=180, W=240)
 
-        null_event = self.make_null_event(event, T=1, H=34, W=34)
+        null_event = self.make_null_event(event, 1, (1, 34, 34))
         adv = torch.cat([event, null_event], dim=0)
         null_adv = null_event[:, 2]
 
