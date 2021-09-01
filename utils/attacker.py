@@ -71,12 +71,12 @@ class PGDAttacker():
 
     def pgd_attack(self, image_clean, label, model):
         if self.targeted:
-            target_label = label
-        else:
             target_label = self._create_random_target(label)
+        else:
+            target_label = label
 
         adv = image_clean.clone().detach()
-        adv = self.fill_null_event(adv, T=self.epsilon, H=180, W=240)
+        # adv = self.fill_null_event(adv, T=self.epsilon, H=180, W=240)
         adv.requires_grad = True
         for i in range(self.num_iter):
             adv.requires_grad = True
@@ -286,7 +286,8 @@ class PGDAttacker():
         real_adv = real_adv.detach()
 
         # Generating additional adversarial events
-        event = image_clean.clone().detach()
+        # event = image_clean.clone().detach()
+        event = real_adv.clone().detach()
         null_event = self.make_null_event(event, 1, voxel_dimension=self.voxel_dimension)
         adv = torch.cat([event, null_event], dim=0)
 
@@ -318,6 +319,7 @@ class PGDAttacker():
         # adv = torch.cat([event, adam_adv], dim=0)
 
         optimizer = torch.optim.Adam([time_adv], lr=0.01)
+        # scheduler = torch.optim.lr_scheduler.ExponentialLR(optimizer, gamma=0.9)
 
         for i in range(10):
             #             time_adv.requires_grad = True
@@ -552,7 +554,7 @@ class PGDAttacker():
         event = image_clean.clone().detach()
         #         null_event = self.make_null_event(event, T=self.epsilon, H=180, W=240)
 
-        null_event = self.make_null_event(event, 1, (1, 34, 34))
+        null_event = self.make_null_event(event, 1, voxel_dimension=self.voxel_dimension)
         adv = torch.cat([event, null_event], dim=0)
         null_adv = null_event[:, 2]
 
@@ -572,7 +574,8 @@ class PGDAttacker():
                 null_adv = null_adv + null_g * self.event_step_size
 
         # generating additional adversarial events
-        adam_adv = null_event[self.get_top_percentile(null_g, batch_size=4)]
+        # adam_adv = null_event[self.get_top_percentile(null_g, batch_size=4)]
+        adam_adv = null_event[self.get_top_percentile(null_g, batch_size=int((1+torch.max(image_clean[:, -1])).item()))]
         adam_adv = adam_adv.repeat_interleave(self.epsilon, dim=0)
 
         adamb_adv = self.make_behind_null_event(event, self.epsilon)
@@ -582,16 +585,17 @@ class PGDAttacker():
         #         time_adv = 0.5* torch.ones_like(adam_adv[:, 2])
         #         time_adv = 0.5 + 0.1 * torch.rand_like(adam_adv[:, 2]) # time_adv = torch.rand_like(adam_adv[:, 2])  # time_adv = 0.5* torch.ones_like(adam_adv[:, 2])
         #         time_adv = 0.5+0.1*torch.rand_like(adam_adv[:, 2])
-        time_adv = torch.rand_like(adam_adv[:, 2])
+        # time_adv = 0.5 + 0.1*torch.rand_like(adam_adv[:, 2])
+        time_adv = adam_adv[:, 2].clone() + 0.02 * torch.rand_like(adam_adv[:, 2])
         time_adv = time_adv.detach()
         time_adv.requires_grad = True
 
         adam_adv[:, 2] = time_adv
-        adv = torch.cat([event, adam_adv], dim=0)
+        # adv = torch.cat([event, adam_adv], dim=0)
 
         optimizer = torch.optim.Adam([time_adv], lr=0.01)
 
-        for i in range(20):
+        for i in range(10):
             #             time_adv.requires_grad = True
             adam_adv[:, 2] = time_adv
             adv = torch.cat([event, adam_adv], dim=0)
@@ -610,9 +614,9 @@ class PGDAttacker():
             time_adv = torch.clamp(time_adv, min=0.0, max=1.0)
             adam_adv[:, 2] = time_adv
 
-        adv = torch.cat([real_adv, adam_adv], dim=0)
         real_adv = real_adv.detach()
         adam_adv = adam_adv.detach()
+        adv = torch.cat([real_adv, adam_adv], dim=0)
         adv = adv.detach()
 
         return adv, target_label

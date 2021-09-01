@@ -34,6 +34,7 @@ def FLAGS():
     parser.add_argument("--num_workers", type=int, default=4)
     parser.add_argument("--pin_memory", type=bool, default=True)
     parser.add_argument("--batch_size", type=int, default=4)
+    parser.add_argument("--lr", type=float, default=0.0001)
 
     parser.add_argument("--num_epochs", type=int, default=30)
     parser.add_argument("--save_every_n_epochs", type=int, default=5)
@@ -111,6 +112,7 @@ def train_epoch(model, train_loader, optimizer, lr_scheduler, epoch):
         loss, accuracy = cross_entropy_loss_and_accuracy(pred_labels, labels)
         loss.backward()
         optimizer.step()
+        # print(f"Training epoch {epoch:5d} Accuracy {accuracy.item():.4f}")
         sum_accuracy += accuracy
         sum_loss += loss
 
@@ -230,7 +232,7 @@ if __name__ == '__main__':
     model = model.to(flags.device)
 
     # optimizer and lr scheduler
-    optimizer = torch.optim.Adam(model.parameters(), lr=1e-4)
+    optimizer = torch.optim.Adam(model.parameters(), lr=flags.lr)
     lr_scheduler = torch.optim.lr_scheduler.ExponentialLR(optimizer, 0.5)
 
     writer = SummaryWriter(flags.log_dir)
