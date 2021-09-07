@@ -13,8 +13,9 @@ from utils.loss import cross_entropy_loss_and_accuracy, adv_cross_entropy_loss_a
 from utils.dataset import NCaltech101, NCARS, NMNIST, DVSGesture
 from utils.attacker import PGDAttacker
 
-torch.manual_seed(1)
-np.random.seed(1)
+# torch.manual_seed(1)
+torch.manual_seed(77)
+np.random.seed(77)
 
 
 def FLAGS():
@@ -35,6 +36,8 @@ def FLAGS():
     parser.add_argument("--pin_memory", type=bool, default=True)
     parser.add_argument("--batch_size", type=int, default=4)
     parser.add_argument("--lr", type=float, default=0.0001)
+    parser.add_argument("--time_scale", type=float, default=1.0)
+    parser.add_argument("--tau", type=float, default=1)
 
     parser.add_argument("--num_epochs", type=int, default=30)
     parser.add_argument("--save_every_n_epochs", type=int, default=5)
@@ -191,8 +194,8 @@ if __name__ == '__main__':
 
     if dataset == "N-Caltech101":
         # datasets, add augmentation to training set
-        training_dataset = NCaltech101(flags.training_dataset, augmentation=True)
-        validation_dataset = NCaltech101(flags.validation_dataset)
+        training_dataset = NCaltech101(flags.training_dataset, augmentation=True, time_scale=flags.time_scale, tau=flags.tau)
+        validation_dataset = NCaltech101(flags.validation_dataset, time_scale=flags.time_scale, tau=flags.tau)
         voxel_dimension = (flags.voxel_channel, 180, 240)
         crop_dimension = (224, 224)
     elif dataset == "NCARS":

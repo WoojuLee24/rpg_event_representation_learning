@@ -26,13 +26,14 @@ def random_flip_events_along_x(events, resolution=(180, 240), p=0.5):
 
 
 class NCaltech101(torch.utils.data.Dataset):
-    def __init__(self, root, augmentation=False):
+    def __init__(self, root, augmentation=False, time_scale=1, tau=1):
         self.classes = 101
         self.file_list = listdir(root)
 
         self.files = []
         self.labels = []
-
+        self.time_scale = time_scale
+        self.tau = tau
         self.augmentation = augmentation
 
         for i, c in enumerate(self.file_list):
@@ -57,6 +58,16 @@ class NCaltech101(torch.utils.data.Dataset):
             events = random_flip_events_along_x(events)
         # normalizing time stamps
         events[:, 2] = events[:, 2] / events[:, 2].max(axis=0)
+        # events[:, 2] = events[:, 2] / events[:, 2].max(axis=0) * self.time_scale
+        if self.tau > 1:
+            events = events[events[:, 2] < 1 / self.tau]
+            events[:, 2] = events[:, 2] * self.tau
+        elif self.tau == -1:
+            first_event = events.copy()
+            second_event = events.copy()
+            first_event[:, 2] = first_event[:, 2] / 2
+            second_event[:, 2] = second_event[:, 2] / 2 + 1 / 2
+            events = np.concatenate((first_event, second_event), axis=0)
         return events, label
 
 
