@@ -53,10 +53,11 @@ def FLAGS():
     parser.add_argument("--attack_mode", type=str, default='event')
     parser.add_argument("--adv_test", type=bool, default=False)
     parser.add_argument("--targeted", type=bool, default=False)
-    parser.add_argument("--epsilon", type=int, default=10)
-    parser.add_argument("--num_iter", type=int, default=2)
-    parser.add_argument("--step_size", type=float, default=0.5)
-    parser.add_argument("--event_step_size", type=float, default=0.5)
+    parser.add_argument("--epsilon", type=float, default=0.1)
+    parser.add_argument("--step_size", type=float, default=0.05)
+    parser.add_argument("--num_iter", type=int, default=3)
+    parser.add_argument("--null", type=int, default=5)
+    parser.add_argument("--topp", type=float, default=0.5)
 
 
     flags = parser.parse_args()
@@ -227,8 +228,8 @@ if __name__ == '__main__':
                       num_classes=training_dataset.classes, value_layer=flags.value_layer, projection=flags.projection, pretrained=True,
                       adv=flags.adv, adv_test=flags.adv_test, attack_mode=flags.attack_mode)
     if flags.adv == True:
-        attacker = PGDAttacker(num_iter=flags.num_iter, epsilon=flags.epsilon,
-                               step_size=flags.step_size, event_step_size=flags.event_step_size,
+        attacker = PGDAttacker(num_iter=flags.num_iter, epsilon=flags.epsilon, step_size=flags.step_size,
+                               topp=flags.topp, null=flags.null,
                                num_classes=training_dataset.classes, voxel_dimension=voxel_dimension,
                                targeted=flags.targeted)
         model.set_attacker(attacker)
