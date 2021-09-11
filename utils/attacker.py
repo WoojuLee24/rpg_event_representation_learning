@@ -36,6 +36,14 @@ class PGDAttacker():
         x = torch.cat((p, n), dim=1)
         return x
 
+    def fill_null_event(self, events, T, H, W):
+        B = int((1 + events[-1, -1]).item())
+        vox = torch.zeros((W, H, T, 2, B))
+        null_event = (vox == 0).nonzero().float().cuda()
+        null_event[:, 2] = 0
+        events = torch.cat([null_event, events], dim=0)
+        return events
+
     def make_null_event(self, events, T, voxel_dimension):
         B = int((1 + events[-1, -1]).item())
         C, H, W = voxel_dimension
@@ -43,32 +51,52 @@ class PGDAttacker():
         null_event = (vox == 0).nonzero().float().cuda()
         null_event[:, 2] = 0
         null_event[:, 3] = (null_event[:, 3] - 0.5) * 2
+        _, idx = torch.sort(null_event[:, 4])
+        null_event = null_event[idx]
+
         return null_event
 
-    def fill_null_event(self, events, T, H, W):
+    def make_null_event2(self, events, T, voxel_dimension):
+        # null event
         B = int((1 + events[-1, -1]).item())
+        C, H, W = voxel_dimension
         vox = torch.zeros((W, H, T, 2, B))
         null_event = (vox == 0).nonzero().float().cuda()
         null_event[:, 2] = 0
-        #         events = torch.cat([events, null_event], dim=0)
-        events = torch.cat([null_event, events], dim=0)
-        return events
+        null_event[:, 3] = (null_event[:, 3] - 0.5) * 2
+        _, idx = torch.sort(null_event[:, 4])
+        null_event = null_event[idx]
+        # event_set
+        event_list = events.clone().detach()
+        event_list[:, 2] = 0
+        event_set = torch.unique(event_list, dim=0)
+        # difference
+        combined = torch.cat((event_set, null_event))
+        uniques, counts = combined.unique(return_counts=True, dim=0)
+        difference = uniques[counts == 1]
+        # intersection = uniques[counts > 1]
+        return difference
+
+    def get_top_percentile(self, null_g, batch_size):
+        i = 0
+        boolean_g = 0
+        threshold = z_table[self.topp]
+        for g in torch.split(null_g, int(null_g.shape[0] / batch_size)):
+            if i != 0:
+                boolean_g = torch.cat([boolean_g, (g - torch.mean(g)) / torch.std(g) > threshold])
+            else:
+                boolean_g = (g - torch.mean(g)) / torch.std(g) > threshold
+            i += 1
+
+        return boolean_g
 
     def attack(self, image_clean, label, model, mode='event'):
-        if mode == 'event':
+        if mode == 'shifting':
             return self.pgd_attack(image_clean, label, model)
-        elif mode == 'event_time':
+        elif mode == 'shifting_generating':
             return self.pgd_attack2(image_clean, label, model)
-        elif mode == 'event_pgd':
+        elif mode == 'shifting_generating2':
             return self.pgd_attack3(image_clean, label, model)
-        elif mode == 'event_adam':
-            return self.pgd_attack4(image_clean, label, model)
-        elif mode == 'event_adam2':
-            return self.pgd_attack5(image_clean, label, model)
-        # elif mode == 'event_adam_b':
-        #     return self.pgd_attack6(image_clean, label, model)
-        # elif mode == 'event_adam_m':
-        #     return self.pgd_attack7(image_clean, label, model)
 
     def pgd_attack(self, image_clean, label, model):
         if self.targeted:
@@ -88,9 +116,6 @@ class PGDAttacker():
             g = torch.autograd.grad(losses, adv,
                                     retain_graph=False, create_graph=False)[0]
 
-            # if self.projection != "polarity":
-            #     g = self.apply_polarity_constraint(g)
-
             with torch.no_grad():
                 # Linf step
                 if self.targeted:
@@ -107,107 +132,82 @@ class PGDAttacker():
         return adv, target_label
 
 
-    def pgd_attack3(self, image_clean, label, model):
-        if self.targeted:
-            target_label = self._create_random_target(label)
-        else:
-            target_label = label
+    # def pgd_attack3(self, image_clean, label, model):
+    #     if self.targeted:
+    #         target_label = self._create_random_target(label)
+    #     else:
+    #         target_label = label
+    #
+    #     event = image_clean.clone().detach()
+    #
+    #     null_event = self.make_null_event(event, T=self.epsilon, voxel_dimension=self.voxel_dimension)
+    #     adv = torch.cat([event, null_event], dim=0)
+    #
+    #     real_adv = event[:, 2]
+    #     null_adv = null_event[:, 2]
+    #
+    #     real_adv.requires_grad = True
+    #     null_adv.requires_grad = True
+    #
+    #     for i in range(self.num_iter):
+    #         real_adv.requires_grad = True
+    #         null_adv.requires_grad = True
+    #         adv[:, 2] = torch.cat([real_adv, null_adv], dim=0)
+    #         pred = model._forward_impl(adv)
+    #         losses = F.cross_entropy(pred, target_label)
+    #         real_g = torch.autograd.grad(losses, real_adv,
+    #                                      retain_graph=True, create_graph=False)[0]
+    #         null_g = torch.autograd.grad(losses, null_adv,
+    #                                      retain_graph=False, create_graph=False)[0]
+    #
+    #         with torch.no_grad():
+    #             # Linf step
+    #             if self.targeted:
+    #                 real_adv = real_adv - torch.sign(real_g) * self.step_size
+    #                 null_adv = null_adv - null_g * self.topp
+    #             else:
+    #                 real_adv = real_adv + torch.sign(real_g) * self.step_size
+    #                 null_adv = null_adv + null_g * self.topp
+    #
+    #         # Linf project
+    #         null_adv = torch.where(null_adv < 0.5, torch.zeros_like(null_adv),
+    #                                torch.ones_like(null_adv)).detach()
+    #         real_adv = torch.clamp(real_adv, min=0.0, max=1.0)
+    #
+    #     event[:, 2] = real_adv
+    #
+    #     adam_adv = null_event[null_adv == 1, :]
+    #     time_adv = 0.5 + 0.05 * torch.rand_like(adam_adv[:, 2])  # time_adv = 0.5* torch.ones_like(adam_adv[:, 2])
+    #     time_adv.requires_grad = True
+    #
+    #     adam_adv[:, 2] = time_adv
+    #
+    #     for i in range(100):
+    #         time_adv.requires_grad = True
+    #         adam_adv[:, 2] = time_adv
+    #         pred = model._forward_impl(adam_adv)
+    #         losses = F.cross_entropy(pred, target_label)
+    #         g = torch.autograd.grad(losses, time_adv,
+    #                                 retain_graph=False, create_graph=False)[0]
+    #
+    #         with torch.no_grad():
+    #             # Linf step
+    #             if self.targeted:
+    #                 time_adv = time_adv - torch.sign(g) * self.step_size
+    #             else:
+    #                 time_adv = time_adv + torch.sign(g) * self.step_size
+    #
+    #         time_adv = torch.clamp(time_adv, min=0.0, max=1.0)
+    #         adam_adv[:, 2] = time_adv
+    #
+    #         adv = torch.cat([event, adam_adv], dim=0)
+    #         event = event.detach()
+    #         adam_adv = adam_adv.detach()
+    #         adv = adv.detach()
+    #
+    #     return adv, target_label
 
-        event = image_clean.clone().detach()
-
-        null_event = self.make_null_event(event, T=self.epsilon, voxel_dimension=self.voxel_dimension)
-        adv = torch.cat([event, null_event], dim=0)
-
-        real_adv = event[:, 2]
-        null_adv = null_event[:, 2]
-
-        real_adv.requires_grad = True
-        null_adv.requires_grad = True
-
-        for i in range(self.num_iter):
-            real_adv.requires_grad = True
-            null_adv.requires_grad = True
-            adv[:, 2] = torch.cat([real_adv, null_adv], dim=0)
-            pred = model._forward_impl(adv)
-            losses = F.cross_entropy(pred, target_label)
-            real_g = torch.autograd.grad(losses, real_adv,
-                                         retain_graph=True, create_graph=False)[0]
-            null_g = torch.autograd.grad(losses, null_adv,
-                                         retain_graph=False, create_graph=False)[0]
-
-            with torch.no_grad():
-                # Linf step
-                if self.targeted:
-                    real_adv = real_adv - torch.sign(real_g) * self.step_size
-                    null_adv = null_adv - null_g * self.topp
-                else:
-                    real_adv = real_adv + torch.sign(real_g) * self.step_size
-                    null_adv = null_adv + null_g * self.topp
-
-            # Linf project
-            null_adv = torch.where(null_adv < 0.5, torch.zeros_like(null_adv),
-                                   torch.ones_like(null_adv)).detach()
-            real_adv = torch.clamp(real_adv, min=0.0, max=1.0)
-
-        event[:, 2] = real_adv
-
-        adam_adv = null_event[null_adv == 1, :]
-        time_adv = 0.5 + 0.05 * torch.rand_like(adam_adv[:, 2])  # time_adv = 0.5* torch.ones_like(adam_adv[:, 2])
-        time_adv.requires_grad = True
-
-        adam_adv[:, 2] = time_adv
-
-        for i in range(100):
-            time_adv.requires_grad = True
-            adam_adv[:, 2] = time_adv
-            pred = model._forward_impl(adam_adv)
-            losses = F.cross_entropy(pred, target_label)
-            g = torch.autograd.grad(losses, time_adv,
-                                    retain_graph=False, create_graph=False)[0]
-
-            with torch.no_grad():
-                # Linf step
-                if self.targeted:
-                    time_adv = time_adv - torch.sign(g) * self.step_size
-                else:
-                    time_adv = time_adv + torch.sign(g) * self.step_size
-
-            time_adv = torch.clamp(time_adv, min=0.0, max=1.0)
-            adam_adv[:, 2] = time_adv
-
-            adv = torch.cat([event, adam_adv], dim=0)
-            event = event.detach()
-            adam_adv = adam_adv.detach()
-            adv = adv.detach()
-
-        return adv, target_label
-
-    def make_null_event(self, events, T, voxel_dimension):
-        B = int((1 + events[-1, -1]).item())
-        C, H, W = voxel_dimension
-        vox = torch.zeros((W, H, T, 2, B))
-        null_event = (vox == 0).nonzero().float().cuda()
-        null_event[:, 2] = 0
-        null_event[:, 3] = (null_event[:, 3] - 0.5) * 2
-        _, idx = torch.sort(null_event[:, 4])
-        null_event = null_event[idx]
-
-        return null_event
-
-    def get_top_percentile(self, null_g, batch_size):
-        i = 0
-        boolean_g = 0
-        threshold = z_table[self.topp]
-        for g in torch.split(null_g, int(null_g.shape[0]/batch_size)):
-            if i != 0:
-                boolean_g = torch.cat([boolean_g, (g-torch.mean(g))/torch.std(g) > threshold])
-            else:
-                boolean_g = (g-torch.mean(g))/torch.std(g) > threshold
-            i += 1
-
-        return boolean_g
-
-    def pgd_attack4(self, image_clean, label, model):
+    def pgd_attack2(self, image_clean, label, model):
         if self.targeted:
             target_label = self._create_random_target(label)
         else:
@@ -234,8 +234,6 @@ class PGDAttacker():
                     real_time_adv = real_time_adv + torch.sign(real_g[:, 2]) * self.step_size
 
             # Linf project
-            #             null_adv = torch.where(null_adv < 0.5, torch.zeros_like(null_adv),
-            #                                     torch.ones_like(null_adv)).detach()
             real_time_adv = torch.where(real_time_adv > lower_bound, real_time_adv, lower_bound).detach()
             real_time_adv = torch.where(real_time_adv < upper_bound, real_time_adv, upper_bound).detach()
             real_time_adv = torch.clamp(real_time_adv, min=0.0, max=1.0)
@@ -306,30 +304,7 @@ class PGDAttacker():
 
         return adv, target_label
 
-
-    def make_null_event2(self, events, T, voxel_dimension):
-        # null event
-        B = int((1 + events[-1, -1]).item())
-        C, H, W = voxel_dimension
-        vox = torch.zeros((W, H, T, 2, B))
-        null_event = (vox == 0).nonzero().float().cuda()
-        null_event[:, 2] = 0
-        null_event[:, 3] = (null_event[:, 3] - 0.5) * 2
-        _, idx = torch.sort(null_event[:, 4])
-        null_event = null_event[idx]
-        # event_set
-        event_list = events.clone().detach()
-        event_list[:, 2] = 0
-        event_set = torch.unique(event_list, dim=0)
-        # difference
-        combined = torch.cat((event_set, null_event))
-        uniques, counts = combined.unique(return_counts=True, dim=0)
-        difference = uniques[counts == 1]
-        # intersection = uniques[counts > 1]
-
-        return difference
-
-    def pgd_attack5(self, image_clean, label, model):
+    def pgd_attack3(self, image_clean, label, model):
         if self.targeted:
             target_label = self._create_random_target(label)
         else:
@@ -338,6 +313,8 @@ class PGDAttacker():
         # Typical pgd attack for existing event
         real_adv = image_clean.clone().detach()
         real_time_adv = real_adv[:, 2]
+        lower_bound = torch.clamp(real_time_adv - self.epsilon, min=0., max=1.)
+        upper_bound = torch.clamp(real_time_adv + self.epsilon, min=1., max=1.)
         real_time_adv.requires_grad = True
         for i in range(self.num_iter):
             #             real_time_adv.requires_grad = True
@@ -354,8 +331,8 @@ class PGDAttacker():
                     real_time_adv = real_time_adv + torch.sign(real_g[:, 2]) * self.step_size
 
             # Linf project
-            #             null_adv = torch.where(null_adv < 0.5, torch.zeros_like(null_adv),
-            #                                     torch.ones_like(null_adv)).detach()
+            real_time_adv = torch.where(real_time_adv > lower_bound, real_time_adv, lower_bound).detach()
+            real_time_adv = torch.where(real_time_adv < upper_bound, real_time_adv, upper_bound).detach()
             real_time_adv = torch.clamp(real_time_adv, min=0.0, max=1.0)
 
         real_adv[:, 2] = real_time_adv
@@ -383,18 +360,19 @@ class PGDAttacker():
                 null_adv = null_adv + null_g * self.topp
 
         # generating additional adversarial events
-        adam_adv = null_event[
-            self.get_top_percentile(null_g, batch_size=int((1 + torch.max(image_clean[:, -1])).item()))]
-        adam_adv = adam_adv.repeat_interleave(self.epsilon, dim=0)
+        adam_adv = null_event[self.get_top_percentile(null_g, batch_size=int((1+torch.max(image_clean[:, -1])).item()))]
+        adam_adv = adam_adv.repeat_interleave(self.null, dim=0)
         adam_adv = adam_adv.detach()
         # time_adv = 0.5 + 0.01 * torch.rand_like(adam_adv[:, 2]) # time_adv = 0.5* torch.ones_like(adam_adv[:, 2]) # time_adv = 0.5 + 0.05 * torch.rand_like(adam_adv[:, 2]) # time_adv = torch.rand_like(adam_adv[:, 2])  # time_adv = 0.5* torch.ones_like(adam_adv[:, 2])
         time_adv = torch.rand_like(adam_adv[:, 2])
+        # time_adv = 0.5 + 0.01 * torch.rand_like(adam_adv[:, 2])
         time_adv = time_adv.detach()
         time_adv.requires_grad = True
 
         adam_adv[:, 2] = time_adv
         # adv = torch.cat([event, adam_adv], dim=0)
 
+        # optimizer = torch.optim.SGD([time_adv], lr=0.01)
         optimizer = torch.optim.Adam([time_adv], lr=0.01)
         # scheduler = torch.optim.lr_scheduler.ExponentialLR(optimizer, gamma=0.9)
 
@@ -424,6 +402,7 @@ class PGDAttacker():
 
         return adv, target_label
 
+
     # def pgd_attack5(self, image_clean, label, model):
     #     if self.targeted:
     #         target_label = self._create_random_target(label)
@@ -457,8 +436,9 @@ class PGDAttacker():
     #     real_adv = real_adv.detach()
     #
     #     # Generating additional adversarial events
-    #     event = image_clean.clone().detach()
-    #     null_event = self.make_null_event(event, 1, voxel_dimension=self.voxel_dimension)
+    #     # event = image_clean.clone().detach()
+    #     event = real_adv.clone().detach()
+    #     null_event = self.make_null_event2(event, 1, voxel_dimension=self.voxel_dimension)
     #     adv = torch.cat([event, null_event], dim=0)
     #
     #     null_adv = null_event[:, 2]
@@ -477,10 +457,10 @@ class PGDAttacker():
     #             null_adv = null_adv + null_g * self.topp
     #
     #     # generating additional adversarial events
-    #     adam_adv = null_event[self.get_top_percentile(null_g, batch_size=int((1+torch.max(image_clean[:, -1])).item()))]
+    #     adam_adv = null_event[
+    #         self.get_top_percentile(null_g, batch_size=int((1 + torch.max(image_clean[:, -1])).item()))]
     #     adam_adv = adam_adv.repeat_interleave(self.epsilon, dim=0)
     #     adam_adv = adam_adv.detach()
-    #     # time_adv = 0.5 + 0.01 * torch.rand_like(adam_adv[:, 2]) # time_adv = 0.5* torch.ones_like(adam_adv[:, 2]) # time_adv = 0.5 + 0.05 * torch.rand_like(adam_adv[:, 2]) # time_adv = torch.rand_like(adam_adv[:, 2])  # time_adv = 0.5* torch.ones_like(adam_adv[:, 2])
     #     time_adv = torch.rand_like(adam_adv[:, 2])
     #     time_adv = time_adv.detach()
     #     time_adv.requires_grad = True
@@ -488,190 +468,10 @@ class PGDAttacker():
     #     adam_adv[:, 2] = time_adv
     #     # adv = torch.cat([event, adam_adv], dim=0)
     #
-    #     # optimizer = torch.optim.Adam([time_adv], lr=0.01)
-    #
-    #     for i in range(5):
-    #         time_adv.requires_grad = True
-    #         adam_adv[:, 2] = time_adv
-    #         adv = torch.cat([event, adam_adv], dim=0)
-    #         # optimizer.zero_grad()
-    #         pred = model._forward_impl(adv)
-    #
-    #         losses = F.cross_entropy(pred, target_label)
-    #         time_g = torch.autograd.grad(losses, time_adv,
-    #                                      retain_graph=False, create_graph=False)[0]
-    #         with torch.no_grad():
-    #             # Linf step
-    #             if self.targeted:
-    #                 time_adv = time_adv - torch.sign(time_g) * 0.01
-    #             else:
-    #                 time_adv = time_adv + torch.sign(time_g) * 0.01
-    #
-    #         # Linf project
-    #         time_adv = torch.clamp(time_adv, min=0.0, max=1.0)
-    #         adam_adv[:, 2] = time_adv
-    #
-    #     adv = torch.cat([real_adv, adam_adv], dim=0)
-    #     real_adv = real_adv.detach()
-    #     adam_adv = adam_adv.detach()
-    #     adv = adv.detach()
-    #
-    #     return adv, target_label
-    #
-    # def make_behind_null_event(self, events, epsilon):
-    #     null_events = events
-    #     null_events = null_events.repeat_interleave(epsilon, dim=0)
-    #
-    #     return null_events
-    #
-    # def pgd_attack6(self, image_clean, label, model):
-    #     if self.targeted:
-    #         target_label = self._create_random_target(label)
-    #     else:
-    #         target_label = label
-    #
-    #     # Typical pgd attack for existing event
-    #     real_adv = image_clean.clone().detach()
-    #     real_time_adv = real_adv[:, 2]
-    #     real_time_adv.requires_grad = True
-    #     for i in range(self.num_iter):
-    #         #             real_time_adv.requires_grad = True
-    #         real_adv[:, 2] = real_time_adv
-    #         pred = model._forward_impl(real_adv)
-    #         losses = F.cross_entropy(pred, target_label)
-    #         real_g = torch.autograd.grad(losses, real_adv,
-    #                                      retain_graph=False, create_graph=False)[0]
-    #         with torch.no_grad():
-    #             # Linf step
-    #             if self.targeted:
-    #                 real_time_adv = real_time_adv - torch.sign(real_g[:, 2]) * self.step_size
-    #             else:
-    #                 real_time_adv = real_time_adv + torch.sign(real_g[:, 2]) * self.step_size
-    #
-    #         # Linf project
-    #         real_time_adv = torch.clamp(real_time_adv, min=0.0, max=1.0)
-    #
-    #     real_adv[:, 2] = real_time_adv
-    #
-    #     # Generating additional adversarial events
-    #     event = image_clean.clone().detach()
-    #
-    #     adam_adv = self.make_behind_null_event(event, self.epsilon)
-    #
-    #     #         time_adv = 0.5* torch.ones_like(adam_adv[:, 2])
-    #     #         time_adv = 0.5 + 0.1 * torch.rand_like(adam_adv[:, 2]) # time_adv = torch.rand_like(adam_adv[:, 2])  # time_adv = 0.5* torch.ones_like(adam_adv[:, 2])
-    #     #         time_adv = 0.5+torch.rand_like(adam_adv[:, 2])
-    #     #         time_adv = 0.5 + 0.05 *torch.rand_like(adam_adv[:, 2])
-    #     time_adv = adam_adv[:, 2].clone()
-    #     time_adv += 0.5 * torch.rand_like(adam_adv[:, 2])
-    #     time_adv = time_adv.detach()
-    #     time_adv.requires_grad = True
-    #
-    #     adam_adv[:, 2] = time_adv
-    #     adv = torch.cat([event, adam_adv], dim=0)
-    #
     #     optimizer = torch.optim.Adam([time_adv], lr=0.01)
+    #     # scheduler = torch.optim.lr_scheduler.ExponentialLR(optimizer, gamma=0.9)
     #
-    #     for i in range(5):
-    #         #             time_adv.requires_grad = True
-    #         adam_adv[:, 2] = time_adv
-    #         adv = torch.cat([event, adam_adv], dim=0)
-    #         optimizer.zero_grad()
-    #         pred = model._forward_impl(adv)
-    #
-    #         if self.targeted:
-    #             losses = F.cross_entropy(pred, target_label)
-    #             losses.backward(retain_graph=True)
-    #             optimizer.step()
-    #         else:
-    #             losses = -F.cross_entropy(pred, target_label)
-    #             losses.backward(retain_graph=True)
-    #             optimizer.step()
-    #
-    #         time_adv = torch.clamp(time_adv, min=0.0, max=1.0)
-    #         adam_adv[:, 2] = time_adv
-    #
-    #     adv = torch.cat([real_adv, adam_adv], dim=0)
-    #     real_adv = real_adv.detach()
-    #     adam_adv = adam_adv.detach()
-    #     adv = adv.detach()
-    #
-    #     return adv, target_label
-    #
-    # def pgd_attack7(self, image_clean, label, model):
-    #     if self.targeted:
-    #         target_label = self._create_random_target(label)
-    #     else:
-    #         target_label = label
-    #
-    #     # Typical pgd attack for existing event
-    #     real_adv = image_clean.clone().detach()
-    #     real_time_adv = real_adv[:, 2]
-    #     real_time_adv.requires_grad = True
-    #     for i in range(self.num_iter):
-    #         #             real_time_adv.requires_grad = True
-    #         real_adv[:, 2] = real_time_adv
-    #         pred = model._forward_impl(real_adv)
-    #         losses = F.cross_entropy(pred, target_label)
-    #         real_g = torch.autograd.grad(losses, real_adv,
-    #                                      retain_graph=False, create_graph=False)[0]
-    #         with torch.no_grad():
-    #             # Linf step
-    #             if self.targeted:
-    #                 real_time_adv = real_time_adv - torch.sign(real_g[:, 2]) * self.step_size
-    #             else:
-    #                 real_time_adv = real_time_adv + torch.sign(real_g[:, 2]) * self.step_size
-    #
-    #         real_time_adv = torch.clamp(real_time_adv, min=0.0, max=1.0)
-    #
-    #     real_adv[:, 2] = real_time_adv
-    #
-    #     # Generating additional adversarial events
-    #     event = image_clean.clone().detach()
-    #     #         null_event = self.make_null_event(event, T=self.epsilon, H=180, W=240)
-    #
-    #     null_event = self.make_null_event(event, 1, voxel_dimension=self.voxel_dimension)
-    #     adv = torch.cat([event, null_event], dim=0)
-    #     null_adv = null_event[:, 2]
-    #
-    #     # get null_g
-    #     null_adv.requires_grad = True
-    #     adv[:, 2] = torch.cat([event[:, 2], null_adv], dim=0)
-    #
-    #     #         return adv, event[:, 2], null_adv
-    #     pred = model._forward_impl(adv)
-    #     losses = F.cross_entropy(pred, target_label)
-    #     null_g = torch.autograd.grad(losses, null_adv, retain_graph=False, create_graph=False)[0]
-    #     with torch.no_grad():
-    #         # Linf step
-    #         if self.targeted:
-    #             null_adv = null_adv - null_g * self.topp
-    #         else:
-    #             null_adv = null_adv + null_g * self.topp
-    #
-    #     # generating additional adversarial events
-    #     # adam_adv = null_event[self.get_top_percentile(null_g, batch_size=4)]
-    #     adam_adv = null_event[self.get_top_percentile(null_g, batch_size=int((1+torch.max(image_clean[:, -1])).item()))]
-    #     adam_adv = adam_adv.repeat_interleave(self.epsilon, dim=0)
-    #
-    #     adamb_adv = self.make_behind_null_event(event, self.epsilon)
-    #     adam_adv = torch.cat([adam_adv, adamb_adv], dim=0)
-    #     #         time_adv = self.initialize_random_time(adam_adv, self.epsilon)
-    #
-    #     #         time_adv = 0.5* torch.ones_like(adam_adv[:, 2])
-    #     #         time_adv = 0.5 + 0.1 * torch.rand_like(adam_adv[:, 2]) # time_adv = torch.rand_like(adam_adv[:, 2])  # time_adv = 0.5* torch.ones_like(adam_adv[:, 2])
-    #     #         time_adv = 0.5+0.1*torch.rand_like(adam_adv[:, 2])
-    #     # time_adv = 0.5 + 0.1*torch.rand_like(adam_adv[:, 2])
-    #     time_adv = adam_adv[:, 2].clone() + 0.02 * torch.rand_like(adam_adv[:, 2])
-    #     time_adv = time_adv.detach()
-    #     time_adv.requires_grad = True
-    #
-    #     adam_adv[:, 2] = time_adv
-    #     # adv = torch.cat([event, adam_adv], dim=0)
-    #
-    #     optimizer = torch.optim.Adam([time_adv], lr=0.01)
-    #
-    #     for i in range(10):
+    #     for i in range(20):
     #         #             time_adv.requires_grad = True
     #         adam_adv[:, 2] = time_adv
     #         adv = torch.cat([event, adam_adv], dim=0)
@@ -696,212 +496,3 @@ class PGDAttacker():
     #     adv = adv.detach()
     #
     #     return adv, target_label
-
-    # def pgd_attack4(self, image_clean, label, model):
-    #     if self.targeted:
-    #         target_label = self._create_random_target(label)
-    #     else:
-    #         target_label = label
-    #
-    #     event = image_clean.clone().detach()
-    #
-    #     null_event = self.make_null_event(event, T=self.epsilon, H=180, W=240)
-    #     adv = torch.cat([event, null_event], dim=0)
-    #
-    #     real_adv = event[:, 2]
-    #     null_adv = null_event[:, 2]
-    #
-    #     real_adv.requires_grad = True
-    #     null_adv.requires_grad = True
-    #
-    #     for i in range(self.num_iter):
-    #         real_adv.requires_grad = True
-    #         null_adv.requires_grad = True
-    #         adv[:, 2] = torch.cat([real_adv, null_adv], dim=0)
-    #         pred = model._forward_impl(adv)
-    #         losses = F.cross_entropy(pred, target_label)
-    #         real_g = torch.autograd.grad(losses, real_adv,
-    #                                      retain_graph=True, create_graph=False)[0]
-    #         null_g = torch.autograd.grad(losses, null_adv,
-    #                                      retain_graph=False, create_graph=False)[0]
-    #
-    #         with torch.no_grad():
-    #             # Linf step
-    #             if self.targeted:
-    #                 real_adv = real_adv - torch.sign(real_g) * self.step_size
-    #                 null_adv = null_adv - null_g * self.topp
-    #             else:
-    #                 real_adv = real_adv + torch.sign(real_g) * self.step_size
-    #                 null_adv = null_adv + null_g * self.topp
-    #
-    #         # Linf project
-    #         #             null_adv = torch.where(null_adv < 0.5, torch.zeros_like(null_adv),
-    #         #                                     torch.ones_like(null_adv)).detach()
-    #         real_adv = torch.clamp(real_adv, min=0.0, max=1.0)
-    #
-    #     event[:, 2] = real_adv
-    #     event = event.detach()
-    #
-    #     ############## additional adversarial event ###################
-    #
-    #     event[:, 2] = real_adv
-    #     event = event.detach()
-    #     # event.requires_grad = False
-    #     #
-    #     # adam_adv = null_event[self.get_top_percentile(null_g, batch_size=4)]
-    #     #
-    #     # #         return null_event, null_g, adam_adv
-    #     #
-    #     # #         adam_adv = null_event[(null_g-torch.mean(null_g))/torch.std(null_g)>1.28]
-    #     # time_adv = 0.5 + 0.05 * torch.rand_like(adam_adv[:, 2])
-    #     # # time_adv = torch.rand_like(adam_adv[:, 2])
-    #     # #         time_adv = 0.5* torch.ones_like(adam_adv[:, 2])
-    #     # time_adv = time_adv.detach()
-    #     # time_adv.requires_grad = True
-    #     #
-    #     # adam_adv[:, 2] = time_adv
-    #     # adv = torch.cat([event, adam_adv], dim=0)
-    #     #
-    #     # optimizer = torch.optim.Adam([time_adv], lr=0.01)
-    #     #
-    #     # for i in range(10):
-    #     #     #             time_adv.requires_grad = True
-    #     #     adam_adv[:, 2] = time_adv
-    #     #     adv = torch.cat([event, adam_adv], dim=0)
-    #     #     optimizer.zero_grad()
-    #     #
-    #     #     pred = model._forward_impl(adv)
-    #     #
-    #     #     if self.targeted:
-    #     #         losses = F.cross_entropy(pred, target_label)
-    #     #         losses.backward(retain_graph=True)
-    #     #         optimizer.step()
-    #     #     else:
-    #     #         losses = -F.cross_entropy(pred, target_label)
-    #     #         losses.backward(retain_graph=True)
-    #     #         optimizer.step()
-    #     #
-    #     #     time_adv = torch.clamp(time_adv, min=0.0, max=1.0)
-    #     #     adam_adv[:, 2] = time_adv
-    #     #
-    #     # adv = torch.cat([event, adam_adv], dim=0)
-    #     # event = event.detach()
-    #     # adam_adv = adam_adv.detach()
-    #     # adv = adv.detach()
-    #     ############## additional adversarial event ###################
-    #
-    #     adv = event
-    #
-    #     return adv, target_label
-    #
-    #
-    # def pgd_attack5(self, image_clean, label, model):
-    #     if self.targeted:
-    #         target_label = self._create_random_target(label)
-    #     else:
-    #         target_label = label
-    #
-    #     event = image_clean.clone().detach()
-    #     null_event = self.make_null_event(event, T=self.epsilon, H=180, W=240)
-    #     adv = torch.cat([event, null_event], dim=0)
-    #
-    #     real_adv = event[:, 2]
-    #     null_adv = null_event[:, 2]
-    #
-    #     # get null_g
-    #     null_adv.requires_grad = True
-    #     adv[:, 2] = torch.cat([real_adv, null_adv], dim=0)
-    #     pred = model._forward_impl(adv)
-    #     losses = F.cross_entropy(pred, target_label)
-    #     null_g = torch.autograd.grad(losses, null_adv, retain_graph=False, create_graph=False)[0]
-    #     with torch.no_grad():
-    #         # Linf step
-    #         if self.targeted:
-    #             null_adv = null_adv - null_g * self.topp
-    #         else:
-    #             null_adv = null_adv + null_g * self.topp
-    #
-    #     # generating additional adversarial events
-    #     adam_adv = null_event[self.get_top_percentile(null_g, batch_size=4)]
-    #     time_adv = 0.5 + 0.05 * torch.rand_like(adam_adv[:, 2]) # time_adv = torch.rand_like(adam_adv[:, 2])  # time_adv = 0.5* torch.ones_like(adam_adv[:, 2])
-    #     time_adv = time_adv.detach()
-    #     time_adv.requires_grad = True
-    #
-    #     adam_adv[:, 2] = time_adv
-    #     adv = torch.cat([event, adam_adv], dim=0)
-    #
-    #     optimizer = torch.optim.Adam([time_adv], lr=0.01)
-    #
-    #     for i in range(10):
-    #         #             time_adv.requires_grad = True
-    #         adam_adv[:, 2] = time_adv
-    #         adv = torch.cat([event, adam_adv], dim=0)
-    #         optimizer.zero_grad()
-    #         pred = model._forward_impl(adv)
-    #
-    #         if self.targeted:
-    #             losses = F.cross_entropy(pred, target_label)
-    #             losses.backward(retain_graph=True)
-    #             optimizer.step()
-    #         else:
-    #             losses = -F.cross_entropy(pred, target_label)
-    #             losses.backward(retain_graph=True)
-    #             optimizer.step()
-    #
-    #         time_adv = torch.clamp(time_adv, min=0.0, max=1.0)
-    #         adam_adv[:, 2] = time_adv
-    #
-    #     # typical pgd attack for existing event
-    #     real_adv.requires_grad = True
-    #     for i in range(self.num_iter):
-    #         real_adv.requires_grad = True
-    #         event[:, 2] = real_adv
-    #         pred = model._forward_impl(event)
-    #         losses = F.cross_entropy(pred, target_label)
-    #         real_g = torch.autograd.grad(losses, real_adv,
-    #                                      retain_graph=True, create_graph=False)[0]
-    #         with torch.no_grad():
-    #             # Linf step
-    #             if self.targeted:
-    #                 real_adv = real_adv - torch.sign(real_g) * self.step_size
-    #             else:
-    #                 real_adv = real_adv + torch.sign(real_g) * self.step_size
-    #
-    #         # Linf project
-    #         #             null_adv = torch.where(null_adv < 0.5, torch.zeros_like(null_adv),
-    #         #                                     torch.ones_like(null_adv)).detach()
-    #         real_adv = torch.clamp(real_adv, min=0.0, max=1.0)
-    #
-    #     event[:, 2] = real_adv
-    #     adv = torch.cat([event, adam_adv], dim=0)
-    #     event = event.detach()
-    #     adam_adv = adam_adv.detach()
-    #     adv = adv.detach()
-    #
-    #     return adv, target_label
-
-# def random_attack(self, image_clean, label, num_iter=2, step_size=0.1, epsilon=4, original=False):
-#     if original:
-#         target_label = label  # untargeted
-#     else:
-#         target_label = self._create_random_target(label)  # targeted
-#
-#     adv = image_clean.clone().detach()
-#     adv.requires_grad = True
-#     for i in range(num_iter):
-#         pred = self.classifier.forward(adv)
-#         losses, accuracy = cross_entropy_loss_and_accuracy(pred, target_label)
-#         g = torch.autograd.grad(losses, adv,
-#                                 retain_graph=False, create_graph=False)[0]
-#
-#         g_randk = self.get_randk(g, epsilon)
-#         g_randk = self.apply_polarity_constraint(g_randk)
-#         # Linf step
-#         if original:
-#             adv = adv + torch.sign(g_randk) * step_size  # untargeted
-#         else:
-#             adv = adv - torch.sign(g_randk) * step_size  # targeted
-#
-#         # Linf project for time??
-#
-#     return adv, target_label

@@ -36,7 +36,6 @@ def FLAGS():
     parser.add_argument("--pin_memory", type=bool, default=True)
     parser.add_argument("--batch_size", type=int, default=4)
     parser.add_argument("--lr", type=float, default=0.0001)
-    parser.add_argument("--time_scale", type=float, default=1.0)
     parser.add_argument("--tau", type=float, default=1)
 
     parser.add_argument("--num_epochs", type=int, default=30)
@@ -57,7 +56,7 @@ def FLAGS():
     parser.add_argument("--step_size", type=float, default=0.05)
     parser.add_argument("--num_iter", type=int, default=3)
     parser.add_argument("--null", type=int, default=5)
-    parser.add_argument("--topp", type=float, default=0.5)
+    parser.add_argument("--topp", type=float, default=1)
 
 
     flags = parser.parse_args()
@@ -195,8 +194,8 @@ if __name__ == '__main__':
 
     if dataset == "N-Caltech101":
         # datasets, add augmentation to training set
-        training_dataset = NCaltech101(flags.training_dataset, augmentation=True, time_scale=flags.time_scale, tau=flags.tau)
-        validation_dataset = NCaltech101(flags.validation_dataset, time_scale=flags.time_scale, tau=flags.tau)
+        training_dataset = NCaltech101(flags.training_dataset, augmentation=True, tau=flags.tau)
+        validation_dataset = NCaltech101(flags.validation_dataset, tau=flags.tau)
         voxel_dimension = (flags.voxel_channel, 180, 240)
         crop_dimension = (224, 224)
     elif dataset == "NCARS":
@@ -221,9 +220,6 @@ if __name__ == '__main__':
     validation_loader = Loader(validation_dataset, flags, device=flags.device)
 
     # model, and put to device
-    # model = Classifier(voxel_dimension=(flags.voxel_channel, 180, 240), value_layer=flags.value_layer, projection=flags.projection,
-    #                    adv=flags.adv, epsilon=flags.epsilon, num_iter=flags.num_iter, step_size=flags.step_size)
-
     model = AdvESTNet(voxel_dimension=voxel_dimension, crop_dimension=crop_dimension,
                       num_classes=training_dataset.classes, value_layer=flags.value_layer, projection=flags.projection, pretrained=True,
                       adv=flags.adv, adv_test=flags.adv_test, attack_mode=flags.attack_mode)
@@ -292,97 +288,5 @@ if __name__ == '__main__':
                 "epoch": epoch,
                 "optimizer": optimizer.state_dict(),
             }, flags.log_dir + "/checkpoint_%05d_%.4f.pth" % (epoch, min_validation_loss))
-
-
-
-    # for i in range(start_epoch, flags.num_epochs):
-    #
-    #     sum_accuracy = 0
-    #     sum_loss = 0
-    #     if flags.adv_test == False:
-    #         model = model.train()
-    #         print(f"Training step [{i:3d}/{flags.num_epochs:3d}]")
-    #         for events, labels in tqdm.tqdm(training_loader):
-    #             optimizer.zero_grad()
-    #
-    #             pred_labels, labels = model(events, labels)
-    #             loss, accuracy = cross_entropy_loss_and_accuracy(pred_labels, labels)
-    #
-    #             loss.backward()
-    #
-    #             optimizer.step()
-    #
-    #             sum_accuracy += accuracy
-    #             sum_loss += loss
-    #
-    #             iteration += 1
-    #
-    #         if i % 10 == 9:
-    #             lr_scheduler.step()
-    #
-    #         training_loss = sum_loss.item() / len(training_loader)
-    #         training_accuracy = sum_accuracy.item() / len(training_loader)
-    #         print(f"Training Iteration {iteration:5d}  Loss {training_loss:.4f}  Accuracy {training_accuracy:.4f}")
-    #
-    #         writer.add_scalar("training/accuracy", training_accuracy, iteration)
-    #         writer.add_scalar("training/loss", training_loss, iteration)
-    #
-    #         # representation_vizualization = create_image(representation)
-    #         # writer.add_image("training/representation", representation_vizualization, iteration)
-    #
-    #     sum_accuracy = 0
-    #     sum_loss = 0
-    #     model = model.eval()
-    #
-    #     print(f"Validation step [{i:3d}/{flags.num_epochs:3d}]")
-    #     for events, labels in tqdm.tqdm(validation_loader):
-    #         if flags.adv_test:
-    #             pred_labels, labels = model(events, labels)
-    #             (pred, adv_pred), (labels, target_label) = pred_labels, labels
-    #             loss, accuracy, adv_accuracy, correct_num, attack_num = \
-    #                 adv_cross_entropy_loss_and_accuracy(pred, adv_pred, labels, target_label)
-    #
-    #         with torch.no_grad():
-    #             pred_labels, labels = model(events, labels)
-    #             loss, accuracy = cross_entropy_loss_and_accuracy(pred_labels, labels)
-    #
-    #         sum_accuracy += accuracy
-    #         sum_loss += loss
-    #
-    #     validation_loss = sum_loss.item() / len(validation_loader)
-    #     validation_accuracy = sum_accuracy.item() / len(validation_loader)
-    #
-    #     writer.add_scalar("validation/accuracy", validation_accuracy, iteration)
-    #     writer.add_scalar("validation/loss", validation_loss, iteration)
-    #
-    #     # # visualize representation
-    #     # representation_vizualization = create_image(representation)
-    #     # writer.add_image("validation/representation", representation_vizualization, iteration)
-    #
-    #     print(f"Validation Loss {validation_loss:.4f}  Accuracy {validation_accuracy:.4f}")
-    #
-    #     if validation_loss < min_validation_loss:
-    #         min_validation_loss = validation_loss
-    #         state_dict = model.state_dict()
-    #
-    #         torch.save({
-    #             "state_dict": state_dict,
-    #             "min_val_loss": min_validation_loss,
-    #             "iteration": iteration,
-    #             "optimizer": optimizer.state_dict(),
-    #         }, flags.log_dir + "/model_best.pth")
-    #         print("New best at ", validation_loss)
-    #
-    #     if i % flags.save_every_n_epochs == 0:
-    #         state_dict = model.state_dict()
-    #         torch.save({
-    #             "state_dict": state_dict,
-    #             "min_val_loss": min_validation_loss,
-    #             "iteration": iteration,
-    #             "optimizer": optimizer.state_dict(),
-    #         }, flags.log_dir + "/checkpoint_%05d_%.4f.pth" % (iteration, min_validation_loss))
-
-
-
 
 
