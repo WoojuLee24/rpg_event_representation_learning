@@ -260,64 +260,6 @@ class ESTNet(nn.Module):
         self.classifier.conv1 = nn.Conv2d(input_channels, 64, kernel_size=7, stride=2, padding=3, bias=False)
         self.classifier.fc = nn.Linear(self.classifier.fc.in_features, num_classes)
 
-
-    def trilinear_kernel(self, ts, num_channels):
-        ts = ts[None, ..., None]
-        gt_values = torch.zeros_like(ts)
-
-        gt_values[ts > 0] = (1 - (num_channels - 1) * ts)[ts > 0]
-        gt_values[ts < 0] = ((num_channels - 1) * ts + 1)[ts < 0]
-
-        if num_channels == 1:
-            gt_values[ts < -1.0] = 0
-            gt_values[ts > 1.0] = 0
-        else:
-            gt_values[ts < -1.0 / (num_channels - 1)] = 0
-            gt_values[ts > 1.0 / (num_channels - 1)] = 0
-        gt_values = gt_values.squeeze()
-        return gt_values
-
-    def quantize_layer(self, events, voxel_dimension):
-        # , mlp_layers, activation, value_layer, projection
-        # mlp_layers=[1, 100, 100, 1],
-        #                  activation=nn.LeakyReLU(negative_slope=0.1),
-        #                  value_layer="ValueLayer",
-        #                  projection=None
-
-        # points is a list, since events can have any size
-        B = int((1 + events[-1, -1]).item())
-        num_voxels = int(2 * np.prod(voxel_dimension) * B)
-        vox = events[0].new_full([num_voxels, ], fill_value=0)
-        C, H, W = voxel_dimension
-
-        # get values for each channel
-        x, y, t, p, b = events.t()
-        p = (p + 1) / 2  # maps polarity to 0, 1
-
-        idx_before_bins = x \
-                          + W * y \
-                          + 0 \
-                          + W * H * C * p \
-                          + W * H * C * 2 * b
-
-        if C == 1:
-            values = t
-            idx = idx_before_bins
-            vox.put_(idx.long(), values, accumulate=True)
-        else:
-            for i_bin in range(C):
-                # values = t * self.value_layer.forward(t - i_bin / (C - 1))
-                values = t * self.trilinear_kernel(t - i_bin / (C - 1), num_channels=C)
-                # draw in voxel grid
-                idx = idx_before_bins + W * H * i_bin
-                vox.put_(idx.detach().long(), values, accumulate=True)
-
-        # vox = vox.view(-1, 2, C, H, W)
-        # vox = torch.cat([vox[:, 0, ...], vox[:, 1, ...]], 1)
-        vox = vox.view(-1, 2*C, H, W)
-        return vox
-
-
     def crop_and_resize_to_resolution(self, x, output_resolution=(224, 224)):
         B, C, H, W = x.shape
         if H > W:
@@ -331,23 +273,12 @@ class ESTNet(nn.Module):
 
         return x
 
-    # def forward(self, x):
-    #     vox = self.quantization_layer.forward(x)
-    #     vox_cropped = self.crop_and_resize_to_resolution(vox, self.crop_dimension)
-    #     pred = self.classifier.forward(vox_cropped)
-    #     return pred, vox
 
     def _forward_impl(self, x):
         vox = self.quantization_layer.forward(x)
         vox_cropped = self.crop_and_resize_to_resolution(vox, self.crop_dimension)
         pred = self.classifier.forward(vox_cropped)
         return pred
-
-    # def _forward_impl(self, x):
-    #     vox = self.quantize_layer(x, self.voxel_dimension)
-    #     vox_cropped = self.crop_and_resize_to_resolution(vox, self.crop_dimension)
-    #     pred = self.classifier.forward(vox_cropped)
-    #     return pred
 
 
 class AdvESTNet(ESTNet):
@@ -397,34 +328,3 @@ class AdvESTNet(ESTNet):
                 return (pred, adv_pred), (labels, target_labels)
             else:
                 return self._forward_impl(x), labels
-
-
-# def forward(self, x, labels):
-#     training = self.training
-#     if training:
-#         self.eval()
-#         # ordinary training
-#         if self.adv == False:
-#             images = x
-#             targets = labels
-#         # adversarial training
-#         else:
-#             adv_images, _ = self.attacker.attack(x, labels, self, mode=self.attack_mode)
-#             with torch.no_grad():
-#                 adv_images[:, 4] += (x[-1, -1] + 1)  # adv batch_size
-#                 images = torch.cat([x, adv_images], dim=0)
-#                 targets = torch.cat([labels, labels], dim=0)
-#         self.train()
-#         return self._forward_impl(images), targets
-#     else:
-#         # adv_test
-#         if self.adv_test == True:
-#             adv_images, target_label = self.attacker.attack(x, labels, self, mode=self.attack_mode)
-#             with torch.no_grad():
-#                 pred = self._forward_impl(x)
-#                 adv_pred = self._forward_impl(adv_images)
-#             return (pred, adv_pred), (labels, target_label)
-#         else:
-#             images = x
-#             targets = labels
-#             return self._forward_impl(images), targets
