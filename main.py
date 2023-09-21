@@ -10,7 +10,7 @@ from utils.models import ESTNet, AdvESTNet
 from torch.utils.tensorboard import SummaryWriter
 from utils.loader import Loader
 from utils.loss import cross_entropy_loss_and_accuracy, adv_cross_entropy_loss_and_accuracy
-from utils.dataset import NCaltech101, NCARS, NMNIST, DVSGesture
+from utils.dataset import NCaltech101
 from utils.attacker import PGDAttacker
 
 # torch.manual_seed(1)
@@ -34,7 +34,7 @@ def FLAGS():
     parser.add_argument("--device", default="cuda:0")
     parser.add_argument("--num_workers", type=int, default=4)
     parser.add_argument("--pin_memory", type=bool, default=True)
-    parser.add_argument("--batch_size", type=int, default=4)
+    parser.add_argument("--batch_size", type=int, default=2)
     parser.add_argument("--lr", type=float, default=0.0001)
     parser.add_argument("--tau", type=float, default=1)
 
@@ -44,11 +44,11 @@ def FLAGS():
     # network architecture
     parser.add_argument("--voxel_channel", type=int, default=9)
     parser.add_argument("--value_layer", type=str, default="ValueLayer")
-    parser.add_argument("--projection", type=str, default=None)
+    parser.add_argument("--projection", type=str, default=None, choices=['none'])
 
 
     # adv attack options
-    parser.add_argument("--adv", type=bool, default=False)
+    parser.add_argument("--adv", type=bool, default=True)
     parser.add_argument("--attack_mode", type=str, default='event')
     parser.add_argument("--adv_test", type=bool, default=False)
     parser.add_argument("--targeted", type=bool, default=False)
@@ -190,30 +190,11 @@ def test_epoch_adv(model, val_loader):
 if __name__ == '__main__':
     flags = FLAGS()
     torch.cuda.empty_cache()
-    dataset = (flags.training_dataset).split("/")[3]
 
-    if dataset == "N-Caltech101":
-        # datasets, add augmentation to training set
-        training_dataset = NCaltech101(flags.training_dataset, augmentation=True, tau=flags.tau)
-        validation_dataset = NCaltech101(flags.validation_dataset, tau=flags.tau)
-        voxel_dimension = (flags.voxel_channel, 180, 240)
-        crop_dimension = (224, 224)
-    elif dataset == "NCARS":
-        # datasets, add augmentation to training set
-        training_dataset = NCARS(flags.training_dataset, augmentation=True)
-        validation_dataset = NCARS(flags.validation_dataset)
-        voxel_dimension = (flags.voxel_channel, 240, 304)
-        crop_dimension = (224, 224)
-    elif dataset == "N-MNIST":
-        training_dataset = NMNIST(flags.training_dataset, augmentation=True)
-        validation_dataset = NMNIST(flags.validation_dataset)
-        voxel_dimension = (flags.voxel_channel, 34, 34)
-        crop_dimension = (28, 28)
-    elif dataset == "DVSGesture":
-        training_dataset = DVSGesture(flags.training_dataset, augmentation=True)
-        validation_dataset = DVSGesture(flags.validation_dataset)
-        voxel_dimension = (flags.voxel_channel, 180, 240)
-        crop_dimension = (224, 224)
+    training_dataset = NCaltech101(flags.training_dataset, augmentation=True, tau=flags.tau)
+    validation_dataset = NCaltech101(flags.validation_dataset, tau=flags.tau)
+    voxel_dimension = (flags.voxel_channel, 180, 240)
+    crop_dimension = (224, 224)
 
     # construct loader, handles data streaming to gpu
     training_loader = Loader(training_dataset, flags, device=flags.device)
