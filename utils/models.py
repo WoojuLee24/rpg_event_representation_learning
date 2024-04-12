@@ -6,7 +6,7 @@ import numpy as np
 from torchvision.models.resnet import resnet34
 from utils.loss import cross_entropy_loss_and_accuracy
 import tqdm
-
+import pdb
 
 class ValueLayer(nn.Module):
     def __init__(self, mlp_layers, activation=nn.ReLU(), num_channels=9):
@@ -173,6 +173,7 @@ class QuantizationLayer(nn.Module):
         vox = torch.cat([vox[:, 0, ...], vox[:, 1, ...]], 1)
 
         if self.projection == None:
+            # EST
             pass
         elif self.projection == "polarity":
             # voxel grid
@@ -240,7 +241,8 @@ class ESTNet(nn.Module):
 
         nn.Module.__init__(self)
         self.quantization_layer = QuantizationLayer(voxel_dimension, mlp_layers, activation, value_layer, projection)
-        self.classifier = resnet34(pretrained=pretrained)
+        self.classifier = resnet34(pretrained=False)
+        self.classifier.load_state_dict(torch.load('/ws/external/pretrained/resnet34-b627a593.pth'))
 
         self.voxel_dimension = voxel_dimension
         self.crop_dimension = crop_dimension
@@ -307,7 +309,9 @@ class AdvESTNet(ESTNet):
         if training:
             if self.adv == True:
                 self.eval()
+                #pdb.set_trace()
                 adv_images, _ = self.attacker.attack(x, labels, self, mode=self.attack_mode)
+                #pdb.set_trace()
                 with torch.no_grad():
                     adv_images[:, 4] += (x[:, -1].max() + 1)  # adv batch_size
                     x = torch.cat([x, adv_images], dim=0)

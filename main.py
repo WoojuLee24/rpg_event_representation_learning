@@ -5,6 +5,7 @@ import torchvision
 import os
 import numpy as np
 import tqdm
+import wandb
 
 from utils.models import ESTNet, AdvESTNet
 from torch.utils.tensorboard import SummaryWriter
@@ -12,6 +13,7 @@ from utils.loader import Loader
 from utils.loss import cross_entropy_loss_and_accuracy, adv_cross_entropy_loss_and_accuracy
 from utils.dataset import NCaltech101
 from utils.attacker import PGDAttacker
+from utils.wandb_logger import WandbLogger
 
 # torch.manual_seed(1)
 torch.manual_seed(77)
@@ -44,12 +46,13 @@ def FLAGS():
     # network architecture
     parser.add_argument("--voxel_channel", type=int, default=9)
     parser.add_argument("--value_layer", type=str, default="ValueLayer")
-    parser.add_argument("--projection", type=str, default=None, choices=['none'])
+    parser.add_argument("--projection", type=str, default=None,
+                        choices=['none', 'polarity', 'average_time', 'recent_time', 'time_count' ])
 
 
     # adv attack options
-    parser.add_argument("--adv", type=bool, default=True)
-    parser.add_argument("--attack_mode", type=str, default='event')
+    parser.add_argument("--adv", action='store_true', help='adversarial training or not')
+    parser.add_argument("--attack_mode", type=str, default='shifting', choices=['shifting', 'shifting_generating'])
     parser.add_argument("--adv_test", type=bool, default=False)
     parser.add_argument("--targeted", type=bool, default=False)
     parser.add_argument("--epsilon", type=float, default=0.1)
@@ -58,11 +61,13 @@ def FLAGS():
     parser.add_argument("--null", type=int, default=5)
     parser.add_argument("--topp", type=float, default=1)
 
+    # logging
+    parser.add_argument("--wandb", action='store_true', default=False)
 
     flags = parser.parse_args()
 
     if not os.path.exists(flags.log_dir):
-        os.mkdir(flags.log_dir)
+        os.makedirs(flags.log_dir)
     assert os.path.isdir(dirname(flags.log_dir)), f"Log directory root {dirname(flags.log_dir)} not found."
     assert os.path.isdir(flags.validation_dataset), f"Validation dataset directory {flags.validation_dataset} not found."
     assert os.path.isdir(flags.training_dataset), f"Training dataset directory {flags.training_dataset} not found."
@@ -216,7 +221,13 @@ if __name__ == '__main__':
     optimizer = torch.optim.Adam(model.parameters(), lr=flags.lr)
     lr_scheduler = torch.optim.lr_scheduler.ExponentialLR(optimizer, 0.5)
 
-    writer = SummaryWriter(flags.log_dir)
+    if flags.wandb:
+        name = flags.log_dir.split("/")[-1]
+        wandb_config = dict(project="event_attack", entity='kaist-url-ai28', name=flags.log_dir)
+        wandb_logger = WandbLogger(wandb_config, flags)
+        wandb_logger.before_run()
+    # else:
+    #     writer = SummaryWriter(flags.log_dir)
 
     start_epoch = 0
     iteration = 0
@@ -232,22 +243,28 @@ if __name__ == '__main__':
         validation_loss, validation_accuracy, adv_validation_accuracy, adv_target_validation_accuracy, attack_validation_accuracy = \
             test_epoch_adv(model, validation_loader)
 
-        writer.add_scalar("validation/accuracy", validation_accuracy, iteration)
-        writer.add_scalar("validation/adv_accuracy", adv_validation_accuracy, iteration)
-        writer.add_scalar("validation/adv_accuracy", adv_validation_accuracy, iteration)
-        writer.add_scalar("validation/attack_accuracy", attack_validation_accuracy, iteration)
-        writer.add_scalar("validation/loss", validation_loss, iteration)
+        wandb_logger.wandb.log({"val/accuracy": validation_accuracy})
+        wandb_logger.wandb.log({"val/adv_accuracy": adv_validation_accuracy})
+        wandb_logger.wandb.log({"val/attack_accuracy": attack_validation_accuracy})
+        wandb_logger.wandb.log({"val/loss": validation_loss})
+
         exit()
 
 
     for epoch in range(start_epoch, flags.num_epochs):
         training_loss, training_accuracy = train_epoch(model, training_loader, optimizer, lr_scheduler, epoch)
-        writer.add_scalar("training/accuracy", training_accuracy, epoch)
-        writer.add_scalar("training/loss", training_loss, epoch)
+        wandb_logger.wandb.log({"train/accuracy": training_accuracy})
+        wandb_logger.wandb.log({"train/loss": training_loss})
+
+        # writer.add_scalar("training/accuracy", training_accuracy, epoch)
+        # writer.add_scalar("training/loss", training_loss, epoch)
 
         validation_loss, validation_accuracy = test_epoch(model, validation_loader, epoch)
-        writer.add_scalar("validation/accuracy", validation_accuracy, epoch)
-        writer.add_scalar("validation/loss", validation_loss, epoch)
+        wandb_logger.wandb.log({"val/accuracy": validation_accuracy})
+        wandb_logger.wandb.log({"val/loss": validation_loss})
+
+        # writer.add_scalar("validation/accuracy", validation_accuracy, epoch)
+        # writer.add_scalar("validation/loss", validation_loss, epoch)
 
         if validation_loss < min_validation_loss:
             min_validation_loss = validation_loss

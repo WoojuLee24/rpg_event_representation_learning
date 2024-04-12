@@ -6,6 +6,7 @@ import numpy as np
 from torchvision.models.resnet import resnet34
 from utils.loss import cross_entropy_loss_and_accuracy
 import tqdm
+import pdb
 
 z_table = {0: 100, 0.1: 3.08, 0.5: 2.57, 1: 2.33, 2: 2.05, 3: 1.88, 4: 1.75,5: 1.65, 10: 1.28, 15: 1.03, 20: 0.84, 25: 0.67}
 
@@ -132,6 +133,44 @@ class PGDAttacker():
         return adv, target_label
 
 
+    def pgd_attack4(self, image_clean, label, model):
+        if self.targeted:
+            target_label = self._create_random_target(label)
+        else:
+            target_label = label
+
+        lower_bound = torch.clamp(image_clean[:, 2] - self.epsilon, min=0., max=1.)
+        upper_bound = torch.clamp(image_clean[:, 2] + self.epsilon, min=0., max=1.)
+
+        adv = image_clean.clone().detach()
+        adv.requires_grad = True
+        for i in range(self.num_iter):
+            adv.requires_grad = True
+            pred = model._forward_impl(adv)
+            losses = F.cross_entropy(pred, target_label)
+            g = torch.autograd.grad(losses, adv,
+                                    retain_graph=False, create_graph=False)[0]
+
+            with torch.no_grad():
+                # Linf step
+                if self.targeted:
+                    adv = adv - torch.sign(g) * self.step_size
+                else:
+                    adv = adv + torch.sign(g) * self.step_size
+
+            # Linf project
+            adv[:, 2] = torch.where(adv[:, 2] > lower_bound, adv[:, 2], lower_bound).detach()
+            adv[:, 2] = torch.where(adv[:, 2] < upper_bound, adv[:, 2], upper_bound).detach()
+            adv = adv.detach()
+            target_label = target_label.detach()
+        # Generating additional adversarial events
+        # TODO: 0925
+        event = adv.clone().detach()
+        null_event = self.make_null_event(event, 1, voxel_dimension=self.voxel_dimension)
+        adv = torch.cat([event, null_event], dim=0)
+
+        return adv, target_label
+
     def pgd_attack2(self, image_clean, label, model):
         if self.targeted:
             target_label = self._create_random_target(label)
@@ -145,7 +184,6 @@ class PGDAttacker():
         upper_bound = torch.clamp(real_time_adv + self.epsilon, min=1., max=1.)
         real_time_adv.requires_grad = True
         for i in range(self.num_iter):
-            #             real_time_adv.requires_grad = True
             real_adv[:, 2] = real_time_adv
             pred = model._forward_impl(real_adv)
             losses = F.cross_entropy(pred, target_label)
@@ -169,6 +207,7 @@ class PGDAttacker():
         # Generating additional adversarial events
         # event = image_clean.clone().detach()
         event = real_adv.clone().detach()
+        # pdb.set_trace()
         null_event = self.make_null_event(event, 1, voxel_dimension=self.voxel_dimension)
         adv = torch.cat([event, null_event], dim=0)
 
