@@ -24,8 +24,8 @@ def FLAGS():
     parser = argparse.ArgumentParser("""Train classifier using a learnt quantization layer.""")
 
     # training / validation dataset
-    parser.add_argument("--validation_dataset", default="", required=True)
-    parser.add_argument("--training_dataset", default="", required=True)
+    parser.add_argument("--validation_dataset", default="/ws/data/N-Caltech101/validation")
+    parser.add_argument("--training_dataset", default="/ws/data/N-Caltech101/training")
 
     # logging options
     parser.add_argument("--log_dir", default="", required=True)
@@ -52,11 +52,11 @@ def FLAGS():
 
     # adv attack options
     parser.add_argument("--adv", action='store_true', help='adversarial training or not')
-    parser.add_argument("--attack_mode", type=str, default='shifting', choices=['shifting', 'shifting_generating'])
-    parser.add_argument("--adv_test", type=bool, default=False)
+    parser.add_argument("--attack_mode", type=str, default='shifting', choices=['shifting', 'generating', 'shifting_generating'])
+    parser.add_argument("--adv_test", action='store_true', help='adversarial test or not')
     parser.add_argument("--targeted", type=bool, default=False)
-    parser.add_argument("--epsilon", type=float, default=0.1)
-    parser.add_argument("--step_size", type=float, default=0.05)
+    parser.add_argument("--epsilon", type=float, default=1.0)
+    parser.add_argument("--step_size", type=float, default=0.5)
     parser.add_argument("--num_iter", type=int, default=3)
     parser.add_argument("--null", type=int, default=5)
     parser.add_argument("--topp", type=float, default=1)
@@ -209,7 +209,7 @@ if __name__ == '__main__':
     model = AdvESTNet(voxel_dimension=voxel_dimension, crop_dimension=crop_dimension,
                       num_classes=training_dataset.classes, value_layer=flags.value_layer, projection=flags.projection, pretrained=True,
                       adv=flags.adv, adv_test=flags.adv_test, attack_mode=flags.attack_mode)
-    if flags.adv == True:
+    if flags.adv or flags.adv_test:
         attacker = PGDAttacker(num_iter=flags.num_iter, epsilon=flags.epsilon, step_size=flags.step_size,
                                topp=flags.topp, null=flags.null,
                                num_classes=training_dataset.classes, voxel_dimension=voxel_dimension,
@@ -240,6 +240,7 @@ if __name__ == '__main__':
         # optimizer = optimizer.load_state_dict(checkpoint["optimizer"])
 
     if flags.adv_test:
+        # test attack performance or test adv accuracy (robustness) of the model
         validation_loss, validation_accuracy, adv_validation_accuracy, adv_target_validation_accuracy, attack_validation_accuracy = \
             test_epoch_adv(model, validation_loader)
 

@@ -45,7 +45,7 @@ class NCaltech101(torch.utils.data.Dataset):
         """
         returns events and label, loading events from aedat
         :param idx:
-        :return: x,y,t,p,  label
+        :return: x,y,t,p,label
         """
         label = self.labels[idx]
         f = self.files[idx]
